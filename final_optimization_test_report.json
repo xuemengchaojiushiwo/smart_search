@@ -1,0 +1,267 @@
+{
+  "安联美元.pdf": {
+    "success": true,
+    "file_path": "python_service/file/安联美元.pdf",
+    "file_extension": ".pdf",
+    "processing_time": 0.1323869228363037,
+    "total_chunks": 8,
+    "chunk_size": 1000,
+    "dynamic_overlap": 350,
+    "overlap_ratio": 0.35,
+    "total_text_length": 5234,
+    "avg_chunk_length": 862.625,
+    "overlap_analysis": {
+      "total_chunks": 8,
+      "overlap_analysis": [
+        {
+          "chunk_pair": "1-2",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": ":\n每年1.19%\n财政年度终结日：\n9月30日\n收益分配方式：\n每月*\n投资经理：\n安联投资\n累积回报(%)\n六个月\n一年\n三年\n五年\n成立至今\nAM类（美元）收息股份\n3.83\n8.03\n9.79",
+          "chunk2_start": "此基金投资于美国债券市场高收益评级企业债券，以达致长期资本增值及\n收益。\n基金总值：\n4.4377亿美元\n基金价格（资产净值）：5.7741美元（AM类（美元）收息股份）\n过去12个月\n最高／最低资产",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "2-3",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "或促销本文件所述之任何投资项目。\n— 安联美元高收益基金\nAM 类（美元）收息股份\n资料来源：安联投资，截至2025年1月31日 。基金表现按资产净值对资产净值作基础，以美元计\n算，并作股息滚存投资。",
+          "chunk2_start": "有限公司（「本行」）根据海外基金管理人向本行提供的数据为投资者提供，旨在向投资者披露代客境外理财计划下所投资之基金的部分信息，仅\n供投资者作参考之用。若您想了解本代客境外理财计划，请您向我行索取相关法",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "3-4",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "值作基础，以美元计\n算，并作股息滚存投资。\n投资附带风险，理财产品过往业绩不代表其未来表现，不等于理财产品实际收益，投资须谨慎。\n请参阅产品销售文件以便获取其他资料，包括风险披露。\n安联美元高收益基金",
+          "chunk2_start": "=== 第 2 页 ===\n债券基金额外信息（仅适用于债券基金）\n统计摘要\n平均票面息率\n7.28%\n有效到期日\n5.44 年\n平均信贷质素\nB+\n有效存续期\n2.85 年\n到期收益 \n6.87%\n海",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "4-5",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "代客境外理财计划－开放式海外基金型\n理财非存款、产品有风险、投资须谨慎\n本理财计划是开放式公募理财产品，属于非保本浮动收益产品，不保证本金和收益。您的本金可能蒙受重大损失，您应充分认识投资风险，谨慎投",
+          "chunk2_start": "美国\n1.7\nWESCO DISTRIBUTION INC - 144A 7.2500 \n06/15/28\n支援服务\n美国\n1.7\n股票\n0%\n债券\n97.4%\n流动资金\n2.6%\n总和\n100.0%",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "5-6",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "信心均转弱。一如市场广泛预期，联储局维持利率不变。\n在此背景下，10年期美国国库券收益率下跌，而风险资产及核心定息收益则上升。\n盈利增长、联储局因通胀及劳动力市场持续正常化而进一步采取宽松政策，以及新",
+          "chunk2_start": "海外基金投资分布（截至2025年1月31日）\n市场回顾\n高收益债券市场在1月份高收。第四季业绩期开局不俗，约四分之三的企业公布的盈\n利优于市场综合预期，而前瞻指引则好坏参半。企业管理层正在考虑的因素包",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "6-7",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "利市场情况导致流动性受限制。因市场内部和外部原因，基金产品如\n不能按约定及时变现，投资者可能会蒙受损失。\n二零二五年二月\n注：关于持仓规模，可以通过基金总值及相关比率相乘计算得出。\n安联美元高收益基金",
+          "chunk2_start": "=== 第 3 页 ===\n海外基金派息记录\n* 股息派发适用于AM 类收息股份（每月派息）及仅作参考。息率并不保证，派息可从资本中支付\n（AM类）。这或令每股资产净值即时下降，及令可作未来投资的基金",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "7-8",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": ".03110美元\n5.6200\n6.85%\n15/06/2023\n0.03110美元\n5.5974\n6.88%\n15/05/2023\n0.03110美元\n5.5543\n6.93%\n17/04/2023",
+          "chunk2_start": "0.03110美元\n5.6467\n6.81%\n16/01/2024\n0.03110美元\n5.7071\n6.74%\n15/12/2023\n0.03110美元\n5.7104\n6.73%\n15/11/202",
+          "quality_score": 30
+        }
+      ],
+      "coherence_score": 30.0,
+      "issues": [
+        "块1-2: 重叠比例0.0%，重叠不足",
+        "块2-3: 重叠比例0.0%，重叠不足",
+        "块3-4: 重叠比例0.0%，重叠不足",
+        "块4-5: 重叠比例0.0%，重叠不足",
+        "块5-6: 重叠比例0.0%，重叠不足",
+        "块6-7: 重叠比例0.0%，重叠不足",
+        "块7-8: 重叠比例0.0%，重叠不足"
+      ],
+      "strengths": []
+    },
+    "file_size_mb": 0.5226993560791016
+  },
+  "店铺入住流程.pdf": {
+    "success": true,
+    "file_path": "python_service/file/店铺入住流程.pdf",
+    "file_extension": ".pdf",
+    "processing_time": 0.04740118980407715,
+    "total_chunks": 11,
+    "chunk_size": 1000,
+    "dynamic_overlap": 350,
+    "overlap_ratio": 0.35,
+    "total_text_length": 7881,
+    "avg_chunk_length": 902.8181818181819,
+    "overlap_analysis": {
+      "total_chunks": 11,
+      "overlap_analysis": [
+        {
+          "chunk_pair": "1-2",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": " N G S H U . C O M\n店铺类型-如何选择\n例如\n如果您的营业执照类型是有限责任公司\n那么可以选择：普通企业店、专卖店、旗舰店\n如果您的营业执照类型是个体工商户\n那么可以选择：个体工商店",
+          "chunk2_start": "=== 第 6 页 ===\n小\n红\n书\n商\n家\n课\n堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N ",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "2-3",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "具\n的授权书模板）\n4.境内企业承诺书 （签署平台出\n具的承诺书模板）\n注意事项：\n①确保未在企业经营异常名录中，且所\n售商品在营业执照经营范围内\n②距离有效期截止时间应大于1个月\n店铺资质-主体资质",
+          "chunk2_start": "=== 第 7 页 ===\n小\n红\n书\n商\n家\n课\n堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N ",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "3-4",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "M\nS C H O O L . X I A O H O N G S H U . C O M\n3.选择经营类目\n2.选择个人店\n4.填写个人信息\n个人店入驻操作\n1.个人页—创作中心—更多服务—开通店铺",
+          "chunk2_start": "=== 第 9 页 ===\n小\n红\n书\n商\n家\n课\n堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N ",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "4-5",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N G S H U . C O M\n普通企业店-入驻操作",
+          "chunk2_start": "=== 第 13 页 ===\n小\n红\n书\n商\n家\n课\n堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "5-6",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "店铺名称系统是自动抓取的专业号昵称\n4\n\n\n=== 第 22 页 ===\n公司信息\n店铺类型及品牌\n店铺经营类目\n入驻审核 \n入驻成功\n店铺类型\n第四环节也是最后一个环节\n只需要填写类目及协议即可完成",
+          "chunk2_start": "=== 第 19 页 ===\n【联系人信息】\n•\n联系人信息的手机号码是平台联系您的唯一号\n码，需要您填写可以长期使用的号码哦\n•\n联系人需要与营业执照上的法人保持一致\n\n\n=== 第 20 页 ==",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "6-7",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "店铺保证金，即可激活\n店铺，开始上品销售了。\n\n\n=== 第 27 页 ===\n2\n可以前往小红书商家课堂-规则中心-招商入驻-资费标准-小红书境\n内外店铺资费一览表中查阅普通企业店境内/境外的保证金",
+          "chunk2_start": "=== 第 24 页 ===\n公司信息\n店铺类型及品牌\n店铺经营类目\n入驻审核 \n入驻成功\n店铺类型\n第五环节就是等待平台审核\n请耐心等待哦，等待的过程也不要\n忘记随时登录入驻系统查阅进度\n\n\n===",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "7-8",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "xiaohongshu.com/home/index\n店铺类型\n\n\n=== 第 32 页 ===\n第二环节填写公司信息\n店铺类型\n公司信息\n店铺类型及品牌\n入驻审核\n签署合同\n支付保证金\n店铺经营类目",
+          "chunk2_start": "=== 第 29 页 ===\n小\n红\n书\n商\n家\n课\n堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "8-9",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "标受理通知书，申请商标需要满3个月，商标\n名与专业号名称保持一致，必须一致\n\n\n=== 第 49 页 ===\n商标注册人为公司主体的R标\n\n\n=== 第 51 页 ===\n商标注册人为公司主体的TM标",
+          "chunk2_start": "=== 第 43 页 ===\n选择注册类型：R标（商标注册证）或者TM标（商标注册申请受理通知书）\n一句话总结：R标是商标注册证，TM是商标受理通知\n\n\n=== 第 44 页 ===\n商标权利人是指商",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "9-10",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "=== 第 58 页 ===\n店铺类型\n公司信息\n店铺类型及品牌\n入驻审核\n签署合同\n支付保证金\n店铺经营类目\n恭喜恭喜，已经完成入驻了！\n接下来去跟小红书签署合同，再缴纳下 \n保证金，店铺就激活拉！",
+          "chunk2_start": "=== 第 56 页 ===\n店铺类型\n公司信息\n店铺类型及品牌\n入驻审核\n签署合同\n支付保证金\n店铺经营类目\n恭喜恭喜，已经完成入驻了！\n现在只需要等待审核就好了，不用担心， \n如果审核失败会提供电",
+          "quality_score": 30
+        },
+        {
+          "chunk_pair": "10-11",
+          "overlap_chars": 0,
+          "overlap_ratio": 0.0,
+          "chunk1_end": "司对公账户打款。\n•\n如若打错保证金几种情况，提供打款凭证+卡户名、卡户、卡户银行（具体到支行）+具体原因反\n馈 给商服进行核实，核实后给到解决方案。\n•\n保证金仅需在入驻时缴纳一次，续签无需再次缴纳",
+          "chunk2_start": "=== 第 64 页 ===\n小\n红\n书\n商\n家\n课\n堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N",
+          "quality_score": 30
+        }
+      ],
+      "coherence_score": 30.0,
+      "issues": [
+        "块1-2: 重叠比例0.0%，重叠不足",
+        "块2-3: 重叠比例0.0%，重叠不足",
+        "块3-4: 重叠比例0.0%，重叠不足",
+        "块4-5: 重叠比例0.0%，重叠不足",
+        "块5-6: 重叠比例0.0%，重叠不足",
+        "块6-7: 重叠比例0.0%，重叠不足",
+        "块7-8: 重叠比例0.0%，重叠不足",
+        "块8-9: 重叠比例0.0%，重叠不足",
+        "块9-10: 重叠比例0.0%，重叠不足",
+        "块10-11: 重叠比例0.0%，重叠不足"
+      ],
+      "strengths": []
+    },
+    "file_size_mb": 6.555809020996094
+  },
+  "manus介绍.docx": {
+    "success": true,
+    "file_path": "python_service/file/manus介绍.docx",
+    "file_extension": ".docx",
+    "processing_time": 0.0,
+    "total_chunks": 1,
+    "chunk_size": 1000,
+    "dynamic_overlap": 250,
+    "overlap_ratio": 0.25,
+    "total_text_length": 750,
+    "avg_chunk_length": 750.0,
+    "overlap_analysis": {
+      "total_chunks": 1,
+      "overlap_analysis": [],
+      "coherence_score": 0,
+      "issues": [],
+      "strengths": []
+    },
+    "file_size_mb": 0.021096229553222656
+  },
+  "小红书选品.xlsx": {
+    "success": true,
+    "file_path": "python_service/file/小红书选品.xlsx",
+    "file_extension": ".xlsx",
+    "processing_time": 0.0,
+    "total_chunks": 1,
+    "chunk_size": 1000,
+    "dynamic_overlap": 300,
+    "overlap_ratio": 0.3,
+    "total_text_length": 750,
+    "avg_chunk_length": 750.0,
+    "overlap_analysis": {
+      "total_chunks": 1,
+      "overlap_analysis": [],
+      "coherence_score": 0,
+      "issues": [],
+      "strengths": []
+    },
+    "file_size_mb": 0.01887798309326172
+  },
+  "network_skill.pptx": {
+    "success": true,
+    "file_path": "python_service/file/network_skill.pptx",
+    "file_extension": ".pptx",
+    "processing_time": 0.0,
+    "total_chunks": 1,
+    "chunk_size": 1000,
+    "dynamic_overlap": 250,
+    "overlap_ratio": 0.25,
+    "total_text_length": 750,
+    "avg_chunk_length": 750.0,
+    "overlap_analysis": {
+      "total_chunks": 1,
+      "overlap_analysis": [],
+      "coherence_score": 0,
+      "issues": [],
+      "strengths": []
+    },
+    "file_size_mb": 14.357545852661133
+  },
+  "summary": {
+    "total_files": 5,
+    "successful_files": 5,
+    "success_rate": 1.0,
+    "average_coherence_score": 12.0,
+    "average_overlap_ratio": 0.3,
+    "total_chunks_generated": 22
+  }
+}

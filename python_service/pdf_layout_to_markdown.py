@@ -20,6 +20,7 @@ import math
 import argparse
 from typing import List, Dict, Any, Tuple
 import re
+import math
 import difflib
 from collections import deque
 
@@ -228,38 +229,128 @@ def extract_tables_by_pdfplumber(pdf_path: str) -> Dict[int, List[List[str]]]:
     return results
 
 
+def normalize_text(s: str) -> str:
+    """归一化文本：用于近重复抑制、表格指纹与页眉页脚清洗。
+    - 小写
+    - 移除空白与常见标点
+    - 保留中英文与数字
+    """
+    s2 = (s or "").lower().strip()
+    s2 = re.sub(r"[\s\u3000]+", "", s2)
+    s2 = re.sub(r"[\-—–·•\.,;:!\?\(\)\[\]\{\}<>\|\/\\\*\^\$\#\+_=~`'\"]+", "", s2)
+    return s2
+
+
+def _looks_like_char_grid(table: List[List[str]]) -> bool:
+    """判断表格是否为逐字切分的“字符网格”（其实是段落被切成单字）。"""
+    if not table or not table[0]:
+        return False
+    # 统计单元格长度分布
+    cells = [c for row in table for c in row if c is not None]
+    if not cells:
+        return False
+    lengths = [len((c or '').strip()) for c in cells]
+    cols = max(len(row) for row in table)
+    # 放宽列阈值，适配较窄字符网格
+    if cols < 6:
+        return False
+    short_ratio = sum(1 for L in lengths if L <= 1) / max(1, len(lengths))
+    # 列较多且大多数单元格为单字符，基本可判定为字符网格
+    return short_ratio >= 0.6
+
+
+def _char_grid_to_paragraph(table: List[List[str]]) -> str:
+    """将字符网格还原为连续段落文本。"""
+    rows = []
+    for row in table:
+        cells = [(c or '').strip() for c in row]
+        rows.append(''.join(cells))
+    text = ''.join(rows)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
 def detect_repeating_headers_footers(doc: fitz.Document) -> Tuple[set, set]:
-    """启发式检测跨页重复的页眉/页脚文本（用于清洗）。"""
+    """启发式检测跨页重复的页眉/页脚文本（用于清洗）。
+    基于页面上/下 15% 高度区域聚合后做归一化计数，阈值按页数的 50%。
+    返回的是归一化后的 key 集合，调用方需同样归一化对比。
+    """
     headers: Dict[str, int] = {}
     footers: Dict[str, int] = {}
     total_pages = len(doc)
 
     for page in doc:
         blocks = extract_blocks(page)
-        # 取前两个与后两个文本块作为候选
-        text_blocks = [b for b in blocks if b.get("type") == "text" and b.get("text")]
-        if text_blocks:
-            head_txt = text_blocks[0]["text"].strip()[:80]
-            if head_txt:
-                headers[head_txt] = headers.get(head_txt, 0) + 1
-            if len(text_blocks) >= 2:
-                head_txt2 = text_blocks[1]["text"].strip()[:80]
-                if head_txt2:
-                    headers[head_txt2] = headers.get(head_txt2, 0) + 1
-        if text_blocks:
-            tail_txt = text_blocks[-1]["text"].strip()[:80]
-            if tail_txt:
-                footers[tail_txt] = footers.get(tail_txt, 0) + 1
-            if len(text_blocks) >= 2:
-                tail_txt2 = text_blocks[-2]["text"].strip()[:80]
-                if tail_txt2:
-                    footers[tail_txt2] = footers.get(tail_txt2, 0) + 1
+        height = float(page.rect.height or 0.0)
+        top_limit = (page.rect.y0 or 0.0) + 0.15 * height
+        bottom_limit = (page.rect.y1 or height) - 0.15 * height
 
-    # 选择出现频率 >= 60% 页的文本作为页眉/页脚
-    threshold = max(2, int(0.6 * total_pages))
+        top_texts: List[str] = []
+        bottom_texts: List[str] = []
+
+        for b in blocks:
+            if b.get("type") != "text":
+                continue
+            bbox = b.get("bbox") or [0, 0, 0, 0]
+            y0 = float(bbox[1] or 0.0)
+            y1 = float(bbox[3] or 0.0)
+            txt = (b.get("text") or "").strip()
+            if not txt:
+                continue
+            # 顶部区域
+            if y0 <= top_limit:
+                top_texts.append(txt)
+            # 底部区域
+            if y1 >= bottom_limit:
+                bottom_texts.append(txt)
+
+        if top_texts:
+            head_txt = " ".join(top_texts)[:160]
+            head_key = normalize_text(head_txt)
+            if len(head_key) >= 10:
+                headers[head_key] = headers.get(head_key, 0) + 1
+        if bottom_texts:
+            foot_txt = " ".join(bottom_texts)[:160]
+            foot_key = normalize_text(foot_txt)
+            if len(foot_key) >= 10:
+                footers[foot_key] = footers.get(foot_key, 0) + 1
+
+    # 选择出现频率 >= 50% 页的文本作为页眉/页脚
+    threshold = max(2, int(0.5 * total_pages))
     header_set = {t for t, c in headers.items() if c >= threshold}
     footer_set = {t for t, c in footers.items() if c >= threshold}
     return header_set, footer_set
+
+
+def _decide_columns_by_histogram(page: fitz.Page, blocks: List[Dict[str, Any]]) -> Tuple[bool, float]:
+    """基于x中心的直方图判断是否双栏，并返回分割中线。"""
+    width = float(page.rect.width or 0)
+    centers = []
+    for b in blocks:
+        bbox = b.get("bbox") or [0, 0, 0, 0]
+        cx = (bbox[0] + bbox[2]) / 2.0
+        if cx > 0:
+            centers.append(cx)
+    if len(centers) < 8:
+        return False, width / 2.0
+    # 10 桶直方图
+    bins = 10
+    hist = [0] * bins
+    for cx in centers:
+        idx = min(bins - 1, max(0, int(cx / max(1.0, width) * bins)))
+        hist[idx] += 1
+    # 找两个主峰
+    peaks = sorted(range(bins), key=lambda i: hist[i], reverse=True)[:2]
+    if len(peaks) < 2:
+        return False, width / 2.0
+    p1, p2 = sorted(peaks)
+    sep = abs(p2 - p1) / bins
+    # 两峰间距至少 0.2 宽度，且峰值够大
+    if sep >= 0.2 and hist[p1] >= 2 and hist[p2] >= 2:
+        # 中线取两峰中点
+        mid = width * ((p1 + p2 + 1) / 2.0 / bins)
+        return True, mid
+    return False, width / 2.0
 
 
 def make_markdown(doc: fitz.Document, out_dir: str, pdf_path: str) -> Dict[str, Any]:
@@ -285,14 +376,6 @@ def make_markdown(doc: fitz.Document, out_dir: str, pdf_path: str) -> Dict[str, 
     # 页眉/页脚候选，用于清洗
     header_set, footer_set = detect_repeating_headers_footers(doc)
 
-    # 近重复文本抑制（全局级别）：避免跨页/双栏导致的大段重复
-    def normalize_text(s: str) -> str:
-        s2 = s.lower().strip()
-        # 去除空白与常见标点，保留中文/英文/数字
-        s2 = re.sub(r"[\s\u3000]+", "", s2)
-        s2 = re.sub(r"[\-—–·•\.,;:!\?\(\)\[\]\{\}<>\|\/\\\*\^\$\#\+_=~`'\"]+", "", s2)
-        return s2
-
     seen_norm = set()
     recent_norm = deque(maxlen=500)
 
@@ -301,19 +384,8 @@ def make_markdown(doc: fitz.Document, out_dir: str, pdf_path: str) -> Dict[str, 
         md_lines.append(f"\n\n<!-- Page {pno} -->\n")
         blocks = extract_blocks(page)
         img_idx = 0
-        # 基于Y坐标稳定排序（少数PDF rawdict顺序可能错乱）
-        # 同时进行双栏启发式：按照 x 中值分左右栏，先左列再右列
-        width = float(page.rect.width or 0)
-        centers = []
-        for b in blocks:
-            bbox = b.get("bbox") or [0, 0, 0, 0]
-            centers.append((b, (bbox[0] + bbox[2]) / 2.0))
-        xs = [c for _, c in centers if c > 0]
-        mid = (min(xs) + max(xs)) / 2.0 if xs else width / 2.0
-        # 判定是否存在明显双列：左右两侧都有足量文本块
-        left_cnt = sum(1 for _, c in centers if c < mid - 20)
-        right_cnt = sum(1 for _, c in centers if c > mid + 20)
-        two_cols = left_cnt >= 3 and right_cnt >= 3
+        # 双栏判定（直方图法）
+        two_cols, mid = _decide_columns_by_histogram(page, blocks)
 
         def sort_key(b: Dict[str, Any]):
             bbox = b.get("bbox") or [0, 0, 0, 0]
@@ -326,26 +398,75 @@ def make_markdown(doc: fitz.Document, out_dir: str, pdf_path: str) -> Dict[str, 
             return (col, y, x, b.get("block_index", 0))
 
         blocks_sorted = sorted(blocks, key=sort_key)
+
+        # 文本段落合并：同列、y间隔较小且左边界接近则合并为一个段
+        merged_blocks: List[Dict[str, Any]] = []
+        # 放宽阈值，减少被切碎的相邻段落
+        GAP_Y = 18.0  # 可调阈值（像素）
+        X_TOL = 12.0
+        def block_column(b: Dict[str, Any]) -> int:
+            if not two_cols:
+                return 0
+            bbox = b.get("bbox") or [0, 0, 0, 0]
+            cx = (bbox[0] + bbox[2]) / 2.0
+            return 0 if cx < mid else 1
+
+        for b in blocks_sorted:
+            if b.get("type") != "text" or not b.get("text"):
+                merged_blocks.append(b)
+                continue
+            if not merged_blocks or merged_blocks[-1].get("type") != "text":
+                merged_blocks.append(b)
+                continue
+            prev = merged_blocks[-1]
+            # 列一致且位置相邻
+            col_ok = block_column(prev) == block_column(b)
+            by = (b.get("bbox") or [0, 0, 0, 0])[1]
+            py = (prev.get("bbox") or [0, 0, 0, 0])[3]
+            bx = (b.get("bbox") or [0, 0, 0, 0])[0]
+            px = (prev.get("bbox") or [0, 0, 0, 0])[0]
+            if col_ok and (by - py) <= GAP_Y and abs(bx - px) <= X_TOL:
+                # 合并文本，处理标点与空格
+                joiner = "\n" if prev["text"].endswith(('.', '。', '！', '？')) else " "
+                prev["text"] = (prev["text"].rstrip() + joiner + b["text"].lstrip()).strip()
+                # 扩展bbox下边界
+                pb = prev.get("bbox") or [0, 0, 0, 0]
+                bb = b.get("bbox") or [0, 0, 0, 0]
+                prev["bbox"] = [min(pb[0], bb[0]), min(pb[1], bb[1]), max(pb[2], bb[2]), max(pb[3], bb[3])]
+            else:
+                merged_blocks.append(b)
+
+        blocks_sorted = merged_blocks
         for b in blocks_sorted:
             if b["type"] == "text":
                 txt = b["text"]
                 if not txt:
                     continue
-                # 页眉/页脚清洗
-                head_key = txt.strip()[:80]
+                # 页眉/页脚清洗（使用归一化匹配，包含子串判断）
+                head_key = normalize_text(txt.strip()[:160])
                 if head_key in header_set or head_key in footer_set:
+                    continue
+                # 若该段是页眉/页脚归一化key的子串（或反过来）也跳过
+                def _is_sub_in_sets(k: str, keys: set) -> bool:
+                    if not k:
+                        return False
+                    for kk in keys:
+                        if len(k) >= 8 and (k in kk or kk in k):
+                            return True
+                    return False
+                if _is_sub_in_sets(head_key, header_set) or _is_sub_in_sets(head_key, footer_set):
                     continue
                 # 近重复抑制：对较长文本做规范化去重
                 norm = normalize_text(txt)
-                if len(txt) >= 30:
+                if len(txt) >= 20:
                     if norm in seen_norm:
                         continue
                     # 与最近窗口内条目做相似度近重复判定
                     skip = False
                     for prev in recent_norm:
-                        if len(prev) < 20:
+                        if len(prev) < 15:
                             continue
-                        if difflib.SequenceMatcher(None, norm[:200], prev[:200]).ratio() >= 0.97:
+                        if difflib.SequenceMatcher(None, norm[:200], prev[:200]).ratio() >= 0.94:
                             skip = True
                             break
                     if skip:
@@ -382,10 +503,44 @@ def make_markdown(doc: fitz.Document, out_dir: str, pdf_path: str) -> Dict[str, 
         # 在页面尾部追加该页的表格（如有）
         page_tables = tables_map.get(pno) or []
         if page_tables:
-            md_lines.append(f"\n**表格（第 {pno} 页）**\n")
             table_seen = set()
+            table_lines: List[str] = []
+            any_output_for_page = False
             for table in page_tables:
                 if not table:
+                    continue
+                # 如果表格看起来是“逐字切分”的字符网格，则按段落输出，避免误判为表格
+                if _looks_like_char_grid(table):
+                    para = _char_grid_to_paragraph(table)
+                    if para:
+                        # 对字符网格段落做全局去重，避免与页面正文/页眉脚重复
+                        para_norm = normalize_text(para)
+                        # 命中页眉/页脚（包含子串）直接跳过
+                        def _contains_in_sets(k: str, keys: set) -> bool:
+                            for kk in keys:
+                                if len(kk) >= 8 and (kk in k or k in kk):
+                                    return True
+                            return False
+                        if _contains_in_sets(para_norm, header_set) or _contains_in_sets(para_norm, footer_set):
+                            continue
+                        if len(para) >= 40:
+                            # 已出现或高度相似则跳过
+                            skip = False
+                            if para_norm in seen_norm:
+                                skip = True
+                            else:
+                                for prev in recent_norm:
+                                    if len(prev) < 15:
+                                        continue
+                                    if difflib.SequenceMatcher(None, para_norm[:300], prev[:300]).ratio() >= 0.94:
+                                        skip = True
+                                        break
+                            if skip:
+                                continue
+                            seen_norm.add(para_norm)
+                            recent_norm.append(para_norm)
+                        table_lines.append(para)
+                        any_output_for_page = True
                     continue
                 # 生成 Markdown 表格
                 header = table[0]
@@ -394,12 +549,16 @@ def make_markdown(doc: fitz.Document, out_dir: str, pdf_path: str) -> Dict[str, 
                     continue
                 if sig:
                     table_seen.add(sig)
-                md_lines.append("| " + " | ".join([c or '' for c in header]) + " |")
-                md_lines.append("| " + " | ".join(["---" for _ in header]) + " |")
+                table_lines.append("| " + " | ".join([c or '' for c in header]) + " |")
+                table_lines.append("| " + " | ".join(["---" for _ in header]) + " |")
                 for row in table[1:]:
-                    md_lines.append("| " + " | ".join([c or '' for c in row]) + " |")
-                md_lines.append("")
+                    table_lines.append("| " + " | ".join([c or '' for c in row]) + " |")
+                table_lines.append("")
                 report["tables"] += 1
+                any_output_for_page = True
+            if any_output_for_page and table_lines:
+                md_lines.append(f"\n**表格（第 {pno} 页）**\n")
+                md_lines.extend(table_lines)
 
     md_path = os.path.join(out_dir, "document.md")
     with open(md_path, "w", encoding="utf-8") as f:

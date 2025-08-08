@@ -71,6 +71,31 @@ except ImportError:
     PYMUPDF4LLM_AVAILABLE = False
     logging.warning("PyMuPDF4LLM 不可用，将使用传统分块")
 
+# 引入基于本地 pymupdf4llm 的定位与预览能力
+try:
+    # 生成带 <sub>pos: ...</sub> 的 Markdown
+    from pymupdf4llm.helpers.pymupdf_rag import to_markdown as to_md_with_pos
+except Exception:
+    to_md_with_pos = None
+
+try:
+    # 解析带位置的 Markdown → aligned_positions
+    from python_service.md_pos_to_aligned import parse_md_with_pos, save_aligned
+except Exception:
+    try:
+        from .md_pos_to_aligned import parse_md_with_pos, save_aligned
+    except Exception:
+        parse_md_with_pos = save_aligned = None
+
+try:
+    # 生成预览 PNG
+    from python_service.preview_alignment import draw_preview
+except Exception:
+    try:
+        from .preview_alignment import draw_preview
+    except Exception:
+        draw_preview = None
+
 # ES相关
 from elasticsearch import Elasticsearch
 import hashlib
@@ -217,6 +242,10 @@ class KnowledgeReference(BaseModel):
     page_num: Optional[int] = None
     chunk_index: Optional[int] = None
     chunk_type: Optional[str] = None
+    # 新增：返回块坐标与字符范围，便于前端高亮
+    bbox_union: Optional[List[float]] = None
+    char_start: Optional[int] = None
+    char_end: Optional[int] = None
 
 class ChatResponse(BaseModel):
     answer: str
@@ -370,6 +399,30 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
                 "file_type": Path(file_path).suffix.lower(),
                 "processing_method": "pymupdf_pro"
             })
+
+        # 集成：基于 PyMuPDF4LLM 生成“页级定位”与预览（不影响分块与入库）
+        try:
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            out_dir = os.path.join(os.path.dirname(file_path), f"out_pdfllm_{base_name}")
+            os.makedirs(out_dir, exist_ok=True)
+            if to_md_with_pos is not None and parse_md_with_pos is not None and save_aligned is not None:
+                md_text = to_md_with_pos(file_path, emit_positions=True)
+                md_pos_path = os.path.join(out_dir, "pdfllm_document_with_pos.md")
+                with open(md_pos_path, "w", encoding="utf-8") as f:
+                    f.write(md_text)
+                aligned_path = os.path.join(out_dir, "aligned_positions.json")
+                items = parse_md_with_pos(md_pos_path)
+                save_aligned(items, aligned_path)
+                # 预览（可选）
+                if draw_preview is not None:
+                    preview_dir = os.path.join(out_dir, "preview")
+                    os.makedirs(preview_dir, exist_ok=True)
+                    draw_preview(file_path, aligned_path, preview_dir)
+                logger.info(f"PDFLLM 定位与预览已生成: {out_dir}")
+            else:
+                logger.warning("PDFLLM 定位/预览依赖不可用，跳过该步骤")
+        except Exception as e:
+            logger.warning(f"PDFLLM 定位与预览生成失败: {e}")
         
         # 使用极客API生成embedding并存入ES
         stored_chunks = 0
@@ -588,7 +641,10 @@ def chat_with_rag(request: ChatRequest):
                 "source_file": src.get("source_file"),
                 "page_num": src.get("page_num"),
                 "chunk_index": src.get("chunk_index"),
-                "chunk_type": src.get("chunk_type")
+                "chunk_type": src.get("chunk_type"),
+                "bbox_union": src.get("bbox_union"),
+                "char_start": src.get("char_start"),
+                "char_end": src.get("char_end"),
             }
             doc = Document(page_content=doc_content, metadata=metadata)
             docs_with_scores.append((doc, score))

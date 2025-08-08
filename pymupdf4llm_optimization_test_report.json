@@ -1,0 +1,35 @@
+{
+  "安联美元.pdf": {
+    "success": false,
+    "error": "Please install 'llama_index'.",
+    "processing_time": 0.0019991397857666016
+  },
+  "店铺入住流程.pdf": {
+    "success": false,
+    "error": "Please install 'llama_index'.",
+    "processing_time": 0.0020325183868408203
+  },
+  "manus介绍.docx": {
+    "success": false,
+    "error": "Please install 'llama_index'.",
+    "processing_time": 0.0019927024841308594
+  },
+  "小红书选品.xlsx": {
+    "success": false,
+    "error": "Please install 'llama_index'.",
+    "processing_time": 0.001992464065551758
+  },
+  "network_skill.pptx": {
+    "success": false,
+    "error": "Please install 'llama_index'.",
+    "processing_time": 0.0009992122650146484
+  },
+  "summary": {
+    "total_files": 5,
+    "successful_files": 0,
+    "success_rate": 0.0,
+    "average_structure_score": 0,
+    "average_semantic_score": 0,
+    "total_chunks_generated": 0
+  }
+}

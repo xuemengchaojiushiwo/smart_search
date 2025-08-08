@@ -1,0 +1,347 @@
+{
+  "PDF_安联美元.pdf": {
+    "success": true,
+    "processing_time": 0.329953670501709,
+    "total_chunks": 7,
+    "total_text_length": 5938,
+    "avg_chunk_length": 848.2857142857143,
+    "chunk_analysis": [
+      {
+        "chunk_index": 0,
+        "length": 997,
+        "preview": "-20\n0\n20\n40\n60\n80\n80\n100\n120\n140\n160\n180\n升\n跌\n百\n分\n率\n指\n数\n表\n现\n二零二五年二月\n汇丰代客境外理财计划－开放式海外基金型\n理财产品信息\n#     ...",
+        "metadata": {
+          "producer": "Microsoft® PowerPoint® for Microsoft 365",
+          "creator": "Microsoft® PowerPoint® for Microsoft 365",
+          "creationdate": "2025-03-02T15:01:20+00:00",
+          "source": "python_service/file/安联美元.pdf",
+          "file_path": "python_service/file/安联美元.pdf",
+          "total_pages": 3,
+          "format": "PDF 1.7",
+          "title": "",
+          "author": "",
+          "subject": "",
+          "keywords": "Public",
+          "moddate": "2025-03-02T15:01:20+00:00",
+          "trapped": "",
+          "modDate": "D:20250302150120+00'00'",
+          "creationDate": "D:20250302150120+00'00'",
+          "page": 0
+        }
+      },
+      {
+        "chunk_index": 1,
+        "length": 896,
+        "preview": "交易日：\n每日\n基金经理#：\nJustin Kass / David Oberto / Michael Yee\n管理费\n(单一行政管理费+）:\n每年1.19%\n财政年度终结日：\n9月30日\n收益分配方...",
+        "metadata": {
+          "producer": "Microsoft® PowerPoint® for Microsoft 365",
+          "creator": "Microsoft® PowerPoint® for Microsoft 365",
+          "creationdate": "2025-03-02T15:01:20+00:00",
+          "source": "python_service/file/安联美元.pdf",
+          "file_path": "python_service/file/安联美元.pdf",
+          "total_pages": 3,
+          "format": "PDF 1.7",
+          "title": "",
+          "author": "",
+          "subject": "",
+          "keywords": "Public",
+          "moddate": "2025-03-02T15:01:20+00:00",
+          "trapped": "",
+          "modDate": "D:20250302150120+00'00'",
+          "creationDate": "D:20250302150120+00'00'",
+          "page": 0
+        }
+      },
+      {
+        "chunk_index": 2,
+        "length": 965,
+        "preview": "债券基金额外信息（仅适用于债券基金）\n统计摘要\n平均票面息率\n7.28%\n有效到期日\n5.44 年\n平均信贷质素\nB+\n有效存续期\n2.85 年\n到期收益 \n6.87%\n海外基金经理评论\n证券\n行业\n...",
+        "metadata": {
+          "producer": "Microsoft® PowerPoint® for Microsoft 365",
+          "creator": "Microsoft® PowerPoint® for Microsoft 365",
+          "creationdate": "2025-03-02T15:01:20+00:00",
+          "source": "python_service/file/安联美元.pdf",
+          "file_path": "python_service/file/安联美元.pdf",
+          "total_pages": 3,
+          "format": "PDF 1.7",
+          "title": "",
+          "author": "",
+          "subject": "",
+          "keywords": "Public",
+          "moddate": "2025-03-02T15:01:20+00:00",
+          "trapped": "",
+          "modDate": "D:20250302150120+00'00'",
+          "creationDate": "D:20250302150120+00'00'",
+          "page": 1
+        }
+      },
+      {
+        "chunk_index": 3,
+        "length": 972,
+        "preview": "3.0%2.6%\n信贷评级分布\n• BB 47.8%\n• B 41.7%\n• CCC 3.3%\n• BBB 0.9%\n• 未被评级 0.7%\n• 其他 3.0%\n• 流动资金 2.6%\n汇丰代客境外理...",
+        "metadata": {
+          "producer": "Microsoft® PowerPoint® for Microsoft 365",
+          "creator": "Microsoft® PowerPoint® for Microsoft 365",
+          "creationdate": "2025-03-02T15:01:20+00:00",
+          "source": "python_service/file/安联美元.pdf",
+          "file_path": "python_service/file/安联美元.pdf",
+          "total_pages": 3,
+          "format": "PDF 1.7",
+          "title": "",
+          "author": "",
+          "subject": "",
+          "keywords": "Public",
+          "moddate": "2025-03-02T15:01:20+00:00",
+          "trapped": "",
+          "modDate": "D:20250302150120+00'00'",
+          "creationDate": "D:20250302150120+00'00'",
+          "page": 1
+        }
+      },
+      {
+        "chunk_index": 4,
+        "length": 399,
+        "preview": "盈利增长、联储局因通胀及劳动力市场持续正常化而进一步采取宽松政策，以及新\n任政府促进美国增长的政策，应带动美国经济在2025年继续扩张。\n除这些因素外，稳定的消费者开支、服务业维持扩张、持续的财政开支...",
+        "metadata": {
+          "producer": "Microsoft® PowerPoint® for Microsoft 365",
+          "creator": "Microsoft® PowerPoint® for Microsoft 365",
+          "creationdate": "2025-03-02T15:01:20+00:00",
+          "source": "python_service/file/安联美元.pdf",
+          "file_path": "python_service/file/安联美元.pdf",
+          "total_pages": 3,
+          "format": "PDF 1.7",
+          "title": "",
+          "author": "",
+          "subject": "",
+          "keywords": "Public",
+          "moddate": "2025-03-02T15:01:20+00:00",
+          "trapped": "",
+          "modDate": "D:20250302150120+00'00'",
+          "creationDate": "D:20250302150120+00'00'",
+          "page": 1
+        }
+      }
+    ],
+    "file_size_mb": 0.5226993560791016
+  },
+  "PDF_店铺入住流程.pdf": {
+    "success": true,
+    "processing_time": 0.10066676139831543,
+    "total_chunks": 53,
+    "total_text_length": 6938,
+    "avg_chunk_length": 130.9056603773585,
+    "chunk_analysis": [
+      {
+        "chunk_index": 0,
+        "length": 118,
+        "preview": "小\n红\n书\n商\n家\n课\n堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N G S H U . C O ...",
+        "metadata": {
+          "producer": "",
+          "creator": "WPS 演示",
+          "creationdate": "2022-11-23T15:11:57+07:11",
+          "source": "python_service/file/店铺入住流程.pdf",
+          "file_path": "python_service/file/店铺入住流程.pdf",
+          "total_pages": 68,
+          "format": "PDF 1.7",
+          "title": "",
+          "author": "",
+          "subject": "",
+          "keywords": "",
+          "moddate": "2024-07-16T06:03:28+08:00",
+          "trapped": "",
+          "encryption": "Standard V4 R4 128-bit RC4",
+          "modDate": "D:20240716060328+08'00'",
+          "creationDate": "D:20221123151157+07'11'",
+          "page": 0
+        }
+      },
+      {
+        "chunk_index": 1,
+        "length": 111,
+        "preview": "小\n红\n书\n商\n家\n课\n堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N G S H U . C O ...",
+        "metadata": {
+          "producer": "",
+          "creator": "WPS 演示",
+          "creationdate": "2022-11-23T15:11:57+07:11",
+          "source": "python_service/file/店铺入住流程.pdf",
+          "file_path": "python_service/file/店铺入住流程.pdf",
+          "total_pages": 68,
+          "format": "PDF 1.7",
+          "title": "",
+          "author": "",
+          "subject": "",
+          "keywords": "",
+          "moddate": "2024-07-16T06:03:28+08:00",
+          "trapped": "",
+          "encryption": "Standard V4 R4 128-bit RC4",
+          "modDate": "D:20240716060328+08'00'",
+          "creationDate": "D:20221123151157+07'11'",
+          "page": 1
+        }
+      },
+      {
+        "chunk_index": 2,
+        "length": 177,
+        "preview": "小\n红\n书\n商\n家\n课\n堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N G S H U . C O ...",
+        "metadata": {
+          "producer": "",
+          "creator": "WPS 演示",
+          "creationdate": "2022-11-23T15:11:57+07:11",
+          "source": "python_service/file/店铺入住流程.pdf",
+          "file_path": "python_service/file/店铺入住流程.pdf",
+          "total_pages": 68,
+          "format": "PDF 1.7",
+          "title": "",
+          "author": "",
+          "subject": "",
+          "keywords": "",
+          "moddate": "2024-07-16T06:03:28+08:00",
+          "trapped": "",
+          "encryption": "Standard V4 R4 128-bit RC4",
+          "modDate": "D:20240716060328+08'00'",
+          "creationDate": "D:20221123151157+07'11'",
+          "page": 2
+        }
+      },
+      {
+        "chunk_index": 3,
+        "length": 287,
+        "preview": "小\n红\n书\n商\n家\n课\n堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N G S H U . C O ...",
+        "metadata": {
+          "producer": "",
+          "creator": "WPS 演示",
+          "creationdate": "2022-11-23T15:11:57+07:11",
+          "source": "python_service/file/店铺入住流程.pdf",
+          "file_path": "python_service/file/店铺入住流程.pdf",
+          "total_pages": 68,
+          "format": "PDF 1.7",
+          "title": "",
+          "author": "",
+          "subject": "",
+          "keywords": "",
+          "moddate": "2024-07-16T06:03:28+08:00",
+          "trapped": "",
+          "encryption": "Standard V4 R4 128-bit RC4",
+          "modDate": "D:20240716060328+08'00'",
+          "creationDate": "D:20221123151157+07'11'",
+          "page": 3
+        }
+      },
+      {
+        "chunk_index": 4,
+        "length": 183,
+        "preview": "小\n红\n书\n商\n家\n课\n堂\nS C H O O L . X I A O H O N G S H U . C O M\nS C H O O L . X I A O H O N G S H U . C O ...",
+        "metadata": {
+          "producer": "",
+          "creator": "WPS 演示",
+          "creationdate": "2022-11-23T15:11:57+07:11",
+          "source": "python_service/file/店铺入住流程.pdf",
+          "file_path": "python_service/file/店铺入住流程.pdf",
+          "total_pages": 68,
+          "format": "PDF 1.7",
+          "title": "",
+          "author": "",
+          "subject": "",
+          "keywords": "",
+          "moddate": "2024-07-16T06:03:28+08:00",
+          "trapped": "",
+          "encryption": "Standard V4 R4 128-bit RC4",
+          "modDate": "D:20240716060328+08'00'",
+          "creationDate": "D:20221123151157+07'11'",
+          "page": 4
+        }
+      }
+    ],
+    "file_size_mb": 6.555809020996094
+  },
+  "DOCX_manus介绍.docx": {
+    "success": true,
+    "processing_time": 0.03842592239379883,
+    "total_chunks": 2,
+    "total_text_length": 1761,
+    "avg_chunk_length": 880.5,
+    "chunk_analysis": [
+      {
+        "chunk_index": 0,
+        "length": 998,
+        "preview": "标题：AI颠覆金融分析！Manus全自动生成特斯拉深度报告，智能革命这样发生\n副标题：揭秘全球首个自主运行Linux的AI分析师如何48小时完成投行级研究\n[官网插入位置1]\n（此处插入Manus官网..."
+      },
+      {
+        "chunk_index": 1,
+        "length": 763,
+        "preview": "3. 多维数据熔炼（15:31-38:40）​\n4. 智能报告生成（38:41-47:28）​\n自动选择Markdown+LaTeX混合排版\n生成28张动态可视化图表\n部署Flask服务提供API访问..."
+      }
+    ],
+    "file_size_mb": 0.021096229553222656
+  },
+  "XLSX_小红书选品.xlsx": {
+    "success": true,
+    "processing_time": 0.12859034538269043,
+    "total_chunks": 6,
+    "total_text_length": 5627,
+    "avg_chunk_length": 937.8333333333334,
+    "chunk_analysis": [
+      {
+        "chunk_index": 0,
+        "length": 921,
+        "preview": "工作表: Sheet1\n小红书应季选品词\n计划月份 | 选品类别 | 可选产品 | 特殊说明\n一月 | 元旦汇演 | 演出服、彩色气球、礼品、装饰、表演服、礼盒、贺卡、手工、拉花、彩绳、彩带、大拉花、..."
+      },
+      {
+        "chunk_index": 1,
+        "length": 948,
+        "preview": "元宵节 | 玩具、手提花灯、装饰品、手工、贴纸、灯笼 | 元宵节，是中国春节年俗中最后一个重要节令，在这个节日吃汤圆，看花灯，挂灯笼，儿童玩具也必不可少，气球、风筝等\n外地回家过年送礼 | 保暖衣物、..."
+      },
+      {
+        "chunk_index": 2,
+        "length": 983,
+        "preview": "注意:315打假 | 愚人玩具、恶搞产品整贵礼物、整贵玩具、首饰品、贺卡、活动易拉宝、店铺活动挂纸、假牙套\n四月 | 愚人节 | 婴儿服装、儿童帽子、爬爬垫、婴儿车挂篮、儿童推车、宝宝防丢绳、收纳袋、..."
+      },
+      {
+        "chunk_index": 3,
+        "length": 995,
+        "preview": "换季/夏季 | 泳衣、小电风扇、拖鞋、泳衣、小电风扇、拖鞋、短袖、防晒服、夏季用品、扇子、防晒系列、冰坐垫、防晒手套、透气鞋垫、防晒帽夏凉被\n六月 | 儿童节 | 童装、儿童车、公仔礼物、滑板车表演服..."
+      },
+      {
+        "chunk_index": 4,
+        "length": 984,
+        "preview": "建军节 | 演出服、舞蹈服、演出装饰品、易拉宝、礼品、纪念品、定制奖杯 | 学校及大型晚会演出道具和服饰;还有一些纪念礼品，商场会搞一些活动挂纸\n九月 | 开学季 | 宿舍用品，床单文具、礼品、衣服、..."
+      }
+    ],
+    "file_size_mb": 0.01887798309326172
+  },
+  "PPTX_network_skill.pptx": {
+    "success": true,
+    "processing_time": 0.9196453094482422,
+    "total_chunks": 16,
+    "total_text_length": 15373,
+    "avg_chunk_length": 960.8125,
+    "chunk_analysis": [
+      {
+        "chunk_index": 0,
+        "length": 994,
+        "preview": "幻灯片 1:\n⽹络编程的那些事⼉\n* 芮峰云\n\ngithub.com/rfyiamcool\nv1\n\n幻灯片 2:\nio 多路复⽤\nsocket基本原理\n⽹络编程模型\n1\n常见问题\n2\n3\n4\n\n幻灯片..."
+      },
+      {
+        "chunk_index": 1,
+        "length": 989,
+        "preview": "幻灯片 7:\n阻塞 vs ⾮阻塞\n\n幻灯片 8:\n阻塞模式\nread data\nreturn data\nread data\nwait for data !!!\n\nreturn data\n陷⼊ sock..."
+      },
+      {
+        "chunk_index": 2,
+        "length": 937,
+        "preview": "可以同时监听多个资源\n⽆需轮询, 有数据被唤醒, 没数据则 block 等待\n当 kernel 中数据准备好的时候，recvfrom 会将数据从\nkernel拷贝到⽤户内存中，这个时候进程是被bloc..."
+      },
+      {
+        "chunk_index": 3,
+        "length": 942,
+        "preview": "幻灯片 22:\nepoll event\n事件 Event\n\nEPOLLIN 读事件\n\nEPOLLOUT 写事件\n\nEPOLLET 边缘触发模式\n\nEPOLLLT ⽔平触发模式\n\nEPOLLRDHUP,..."
+      },
+      {
+        "chunk_index": 4,
+        "length": 933,
+        "preview": "幻灯片 26:\nepoll\nepoll 线程安全的 ?\nepoll 通过 mmap 共享空间 ? epoll 是异步的 ?\n\n\nepoll 使⽤阻塞 fd 读写 ?\n\n幻灯片 27:\nepoll 可监..."
+      }
+    ],
+    "file_size_mb": 14.357545852661133
+  }
+}
