@@ -1,11 +1,34 @@
-# Python服务部署说明
+# 智能知识库系统
 
-## 功能概述
+## 系统概述
 
-Python服务提供以下功能：
-1. **LDAP用户验证**: 企业级用户认证
-2. **文档处理**: 处理PDF、WORD、EXCEL、PowerPoint、TXT文件，使用langchain+专业库解析并存入ES
-3. **RAG对话**: 从ES检索最相近的top5文档进行智能问答
+本系统是一个基于RAG（检索增强生成）的智能知识库管理系统，集成了PyMuPDF Pro、PyMuPDF4LLM、LangChain和极客智坊API，实现文档智能处理和智能问答功能。
+
+## 核心架构
+
+```
+用户上传文档 → PyMuPDF Pro + PyMuPDF4LLM → LangChain分块 → Embedding → ES存储
+                                                                    ↓
+用户提问 → RAG检索 → 极客智坊API → 智能对话
+```
+
+## 技术栈
+
+### 文档处理层
+- **PyMuPDF Pro**: 统一文档处理引擎，支持PDF、Word、Excel、PowerPoint、TXT等
+- **PyMuPDF4LLM**: 基于LlamaIndex的文档结构化处理，保持语义结构
+
+### 分块处理层
+- **LangChain**: 文本分块和向量化
+- **MarkdownHeaderTextSplitter**: 基于Markdown标题的结构化分块
+- **RecursiveCharacterTextSplitter**: 传统分块作为补充
+
+### 向量化存储层
+- **Embedding模型**: `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+- **Elasticsearch**: 向量相似度检索和元数据管理
+
+### LLM对话层
+- **极客智坊API**: GPT-4o-mini模型，基于检索结果的智能问答
 
 ## 环境要求
 
@@ -21,53 +44,38 @@ pip install -r requirements.txt
 
 ## 配置说明
 
-### 1. Elasticsearch配置
+### 主要配置文件
 
-编辑 `config.py` 文件中的ES配置：
-
+#### `config.py`
 ```python
-ES_CONFIG = {
-    "host": "localhost",  # ES服务器地址
-    "port": 9200,        # ES端口
-    "index": "knowledge_base",  # 索引名称
-    "username": "elastic",  # ES用户名
-    "password": "password",   # ES密码
-    "verify_certs": False     # 是否验证证书
-}
-```
-
-### 2. 文档处理配置
-
-```python
+# 文档处理配置
 DOCUMENT_CONFIG = {
-    "chunk_size": 1000,      # 文本分块大小
-    "chunk_overlap": 200,    # 分块重叠大小
-    "allowed_extensions": {".pdf", ".docx", ".xlsx", ".pptx", ".txt"}  # 支持的文件类型
+    "chunk_size": 1000,
+    "chunk_overlap": 300,
+    "dynamic_overlap": {...}
 }
-```
 
-### 3. Embedding模型配置
-
-```python
-EMBEDDING_CONFIG = {
-    "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-    "device": "cpu"  # 或 "cuda" 如果有GPU
+# PyMuPDF Pro配置
+PYMUPDF_PRO_CONFIG = {
+    "enabled": True,
+    "trial_key": "...",
+    "supported_formats": {...}
 }
-```
 
-### 4. RAG配置
-
-```python
-RAG_CONFIG = {
-    "top_k": 5,           # 检索最相近的文档数量
-    "context_limit": 500   # 上下文长度限制
-}
+# 极客智坊API配置
+GEEKAI_API_KEY = "sk-..."
+GEEKAI_CHAT_URL = "https://geekai.co/api/v1/chat/completions"
 ```
 
 ## 启动服务
 
 ```bash
-python app.py
+# 使用启动脚本
+start_python_service.bat
+
+# 或直接运行
+cd python_service
+python app_main.py
 ```
 
 服务将在 http://localhost:8000 启动
@@ -100,16 +108,9 @@ Content-Type: multipart/form-data
 - description: 知识描述
 - tags: 标签（逗号分隔）
 - effective_time: 生效时间
-
-支持的文件类型:
-- PDF (.pdf): 使用PyMuPDF解析
-- Word (.docx): 使用python-docx解析
-- Excel (.xlsx): 使用openpyxl解析
-- PowerPoint (.pptx): 使用python-pptx解析
-- 文本 (.txt): 直接读取
 ```
 
-### 4. RAG对话
+### 4. RAG智能问答
 ```
 POST /api/rag/chat
 {
@@ -121,22 +122,22 @@ POST /api/rag/chat
 ## 支持的文件类型
 
 ### PDF文件 (.pdf)
-- 使用 PyMuPDFLoader 解析
+- 使用 PyMuPDF Pro 解析
+- PyMuPDF4LLM 结构化处理
 - 提取文本内容和页面信息
-- 支持多页文档
 
 ### Word文档 (.docx)
-- 使用 python-docx 解析
+- 使用 PyMuPDF Pro 解析
 - 提取段落文本和表格内容
 - 保持文档结构
 
 ### Excel表格 (.xlsx)
-- 使用 openpyxl 解析
+- 使用 PyMuPDF Pro 解析
 - 提取所有工作表数据
-- 按行组织数据，用"|"分隔单元格
+- 按行组织数据
 
 ### PowerPoint演示文稿 (.pptx)
-- 使用 python-pptx 解析
+- 使用 PyMuPDF Pro 解析
 - 提取幻灯片文本内容
 - 按幻灯片组织内容
 
@@ -144,21 +145,55 @@ POST /api/rag/chat
 - 直接读取文本内容
 - 支持UTF-8编码
 
+## 核心功能
+
+### 1. 智能文档处理
+- **多格式支持**: PDF、Word、Excel、PowerPoint、TXT等
+- **结构化分块**: 基于文档标题层级的智能分块
+- **语义保持**: 保持文档的语义完整性和上下文连贯性
+
+### 2. 向量化存储
+- **高效向量化**: 使用多语言Embedding模型
+- **相似度检索**: 基于余弦相似度的文档检索
+- **元数据管理**: 完整的知识库元数据管理
+
+### 3. 智能问答
+- **RAG检索**: 基于向量相似度的相关文档检索
+- **上下文构建**: 动态组合检索到的文档内容
+- **智能生成**: 使用极客智坊API生成高质量回答
+
 ## 性能优化
 
-### 1. 内存优化
-- 使用临时文件处理大文档
-- 及时清理临时文件
-- 分批处理大量数据
+### 1. 文档处理优化
+- **并行处理**: 支持多文档并行处理
+- **内存管理**: 使用临时文件处理大文档
+- **缓存机制**: 缓存Embedding模型
 
-### 2. 处理速度优化
-- 并行处理多个文档
-- 缓存embedding模型
-- 优化文本分块策略
+### 2. 检索优化
+- **索引优化**: ES索引配置优化
+- **查询优化**: 相似度检索算法优化
+- **结果缓存**: 缓存常用查询结果
+
+### 3. API调用优化
+- **超时设置**: 30秒超时保护
+- **重试机制**: API调用失败自动重试
+- **回退策略**: API失败时使用模拟回答
+
+## 监控和日志
+
+### 健康检查
+- **ES连接检查**: 验证Elasticsearch连接
+- **PyMuPDF Pro检查**: 验证文档处理能力
+- **极客智坊API检查**: 验证API连接状态
+
+### 日志记录
+- **处理日志**: 记录文档处理过程
+- **API日志**: 记录极客智坊API调用
+- **错误日志**: 记录异常和错误信息
 
 ## 故障排除
 
-### 1. 常见问题
+### 常见问题
 
 **文档解析失败**
 - 检查文件格式是否正确
@@ -170,31 +205,40 @@ POST /api/rag/chat
 - 确认连接配置正确
 - 检查网络连接
 
+**极客智坊API调用失败**
+- 检查API密钥是否正确
+- 确认网络连接正常
+- 查看API调用日志
+
 **内存不足**
 - 增加系统内存
 - 减少chunk_size配置
 - 分批处理大文档
 
-### 2. 日志查看
+## 扩展性
 
-```bash
-# 查看服务日志
-tail -f app.log
+### 1. 新文档格式支持
+- 在PyMuPDF Pro配置中添加新格式
+- 在文档处理函数中添加解析逻辑
 
-# 查看错误日志
-grep ERROR app.log
-```
+### 2. 新LLM集成
+- 在配置中添加新的API配置
+- 在对话函数中添加新的API调用
 
-## 扩展功能
+### 3. 新检索策略
+- 在检索函数中添加新的检索算法
+- 支持混合检索策略
 
-### 1. 新增文件类型支持
-在 `app.py` 的 `process_document` 函数中添加新的文件类型处理逻辑
+## 总结
 
-### 2. 自定义文本分割
-修改 `DOCUMENT_CONFIG` 中的分块参数
+本系统实现了完整的RAG架构：
+- **文档处理**: PyMuPDF Pro + PyMuPDF4LLM
+- **分块策略**: LangChain结构化分块
+- **向量存储**: Elasticsearch
+- **智能问答**: 极客智坊API + GPT-4o-mini
 
-### 3. 增强元数据提取
-在文档处理过程中提取更多元数据信息
-
-### 4. 文档预处理
-添加文档清洗、格式转换等预处理步骤 
+通过这种架构，系统能够：
+1. 智能处理多种文档格式
+2. 保持文档的语义结构
+3. 提供准确的相似度检索
+4. 生成高质量的智能回答 

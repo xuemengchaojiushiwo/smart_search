@@ -13,8 +13,37 @@ ES_CONFIG = {
 # 文档处理配置
 DOCUMENT_CONFIG = {
     "chunk_size": 1000,
-    "chunk_overlap": 200,
-    "allowed_extensions": {".pdf", ".docx", ".xlsx", ".txt", ".pptx"}
+    "chunk_overlap": 300,  # 从200增加到300，提高重叠比例
+    "allowed_extensions": {".pdf", ".docx", ".xlsx", ".txt", ".pptx"},
+    # 动态重叠策略
+    "dynamic_overlap": {
+        "pdf": 0.35,      # PDF文档35%重叠
+        "docx": 0.25,     # Word文档25%重叠
+        "pptx": 0.25,     # PowerPoint文档25%重叠
+        "xlsx": 0.30,     # Excel文档30%重叠
+        "txt": 0.20,      # 文本文档20%重叠
+        "default": 0.30   # 默认30%重叠
+    },
+    # 分块器配置
+    "splitter_config": {
+        "separators": [
+            "\n\n",  # 段落分隔
+            "\n",    # 行分隔
+            "。",    # 中文句号
+            "！",    # 中文感叹号
+            "？",    # 中文问号
+            ".",     # 英文句号
+            "!",     # 英文感叹号
+            "?",     # 英文问号
+            ";",     # 分号
+            ":",     # 冒号
+            "，",    # 中文逗号
+            ",",     # 英文逗号
+            " ",     # 空格
+        ],
+        "keep_separator": True,  # 保留分隔符
+        "is_separator_regex": False  # 不使用正则表达式
+    }
 }
 
 # Embedding模型配置
@@ -25,7 +54,7 @@ EMBEDDING_CONFIG = {
 
 # RAG配置
 RAG_CONFIG = {
-    "top_k": 5,  # 检索最相近的文档数量
+    "top_k": 3,  # 检索最相近的文档数量（从5改为3）
     "context_limit": 500  # 上下文长度限制
 }
 
@@ -56,10 +85,41 @@ CHUNKING_CONFIG = {
         ("#", "标题1"),
         ("##", "标题2"), 
         ("###", "标题3"),
+        ("####", "标题4"),
+        ("#####", "标题5"),
+        ("######", "标题6"),
     ],
     "traditional_splitter": {
         "chunk_size": 1000,
-        "chunk_overlap": 200,
+        "chunk_overlap": 300,  # 从200增加到300
         "separators": ["\n\n", "\n", "。", "！", "？", ".", "!", "?"]
+    },
+    # PyMuPDF4LLM 优化配置
+    "pymupdf4llm_config": {
+        "min_chunks": 3,  # 最少chunks数量
+        "max_chunk_size": 1500,  # 最大chunk大小
+        "min_chunk_size": 200,   # 最小chunk大小
+        "use_semantic_overlap": True,  # 使用语义重叠
+        "preserve_structure": True,     # 保持文档结构
+        "enhance_with_traditional": True  # 使用传统分块增强
     }
-} 
+}
+
+# 极客智坊 API 配置
+GEEKAI_API_KEY = "sk-fN48cWer80XHieChQuQqGGZNdcSivSn3b9EgpH5eu6MP4eST"
+GEEKAI_API_BASE = "https://geekai.co/api/v1"
+GEEKAI_EMBEDDING_URL = f"{GEEKAI_API_BASE}/embeddings"
+GEEKAI_CHAT_URL = f"{GEEKAI_API_BASE}/chat/completions"
+
+# 默认模型配置
+DEFAULT_CHAT_MODEL = "gpt-4o-mini"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+
+# 服务配置
+HOST = "0.0.0.0"
+PORT = 5000
+DEBUG = True
+
+# 日志配置
+LOG_LEVEL = "INFO"
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s" 
