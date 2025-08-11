@@ -296,423 +296,346 @@ def validate_ldap_user(request: LdapValidateRequest):
 def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: str, 
                            description: str, tags: str, effective_time: str, original_filename: str = None):
     """
-    使用 PyMuPDF Pro + PyMuPDF4LLM 统一处理文档
+    使用 PyMuPDF 统一处理文档，生成PDFLLM风格的输出
     """
     logger.info(f"开始统一处理文档: {file_path}")
     
     try:
-        # 使用 PyMuPDF / Pro 打开文档
+        # 使用 PyMuPDF 打开文档
         doc = pymupdf.open(file_path)
-        logger.info(f"成功打开文档，页数: {len(doc)}，is_reflowable={getattr(doc, 'is_reflowable', False)}")
+        logger.info(f"成功打开文档，页数: {len(doc)}")
 
-        # 对非PDF或可重排文档，先转换为标准PDF，便于稳定获取页码与坐标
+        # 对非PDF文档，先转换为标准PDF
         input_suffix = Path(file_path).suffix.lower()
         use_pdf_doc = doc
         try:
-            if input_suffix != ".pdf" or getattr(doc, "is_reflowable", False):
-                logger.info("检测到非PDF或可重排文档，开始转换为PDF…")
+            if input_suffix != ".pdf":
+                logger.info("检测到非PDF文档，开始转换为PDF…")
                 pdf_bytes = doc.convert_to_pdf()
                 use_pdf_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
                 logger.info(f"转换完成，PDF页数: {len(use_pdf_doc)}")
         except Exception as e:
             logger.warning(f"转换PDF失败，回退使用原文档提取：{e}")
         
-        # 提取文本（页粒度），同时构建词级索引与页面尺寸，便于后续 chunk bbox 计算与归一化
-        page_texts: List[str] = []
-        page_word_entries: List[List[tuple]] = []
-        page_sizes: List[tuple] = []  # (width, height)
-        for page_num, page in enumerate(use_pdf_doc):
-            p_text, p_entries = build_page_text_and_word_index(page)
-            page_texts.append(p_text or "")
-            page_word_entries.append(p_entries or [])
-            try:
-                page_sizes.append((float(page.rect.width), float(page.rect.height)))
-            except Exception:
-                page_sizes.append((0.0, 0.0))
-        full_text = "\n\n".join(page_texts)
-        logger.info(f"文本提取完成，总字符数: {len(full_text)}")
+        # 使用PyMuPDF生成干净的Markdown内容
+        md_text = generate_pdfllm_style_markdown(use_pdf_doc, original_filename or Path(file_path).name)
+        logger.info(f"生成了干净的Markdown内容，长度: {len(md_text)}")
         
-        # 使用 PyMuPDF4LLM 进行结构化分块（强制使用，不使用回退）
-        chunks: List[Document] = []
-        if not PYMUPDF4LLM_AVAILABLE:
-            raise Exception("PyMuPDF4LLM 不可用，无法进行文档分块")
+        # 单独提取位置信息映射
+        position_mapping = extract_position_mapping(use_pdf_doc)
+        logger.info(f"提取出 {len(position_mapping)} 个位置信息项")
         
-        try:
-            # 首先生成带位置信息的markdown
-            if to_md_with_pos is not None:
-                try:
-                    # 尝试不同的调用方式，首先尝试带emit_positions参数
-                    try:
-                        # 确保传递正确的参数类型
-                        doc_input = use_pdf_doc if use_pdf_doc is not None else file_path
-                        md_text = to_md_with_pos(doc_input, emit_positions=True)
-                        logger.info(f"生成了带位置信息的markdown（使用emit_positions=True），长度: {len(md_text)}")
-                        
-                        # 检查是否真的生成了位置信息
-                        if '<sub>pos:' in md_text:
-                            logger.info(f"✅ 成功生成位置标签，数量: {md_text.count('<sub>pos:')}")
-                        else:
-                            logger.warning("⚠️ 虽然使用了emit_positions=True，但没有生成位置标签")
-                            
-                    except TypeError as e:
-                        # 如果不支持emit_positions参数，尝试不带参数调用
-                        logger.warning(f"to_md_with_pos不支持emit_positions参数: {e}，尝试不带参数调用")
-                        doc_input = use_pdf_doc if use_pdf_doc is not None else file_path
-                        md_text = to_md_with_pos(doc_input)
-                        logger.info(f"生成了markdown（不带参数），长度: {len(md_text)}")
-                    
-                    # 解析位置信息
-                    if parse_md_with_pos is not None:
-                        # 添加调试日志
-                        logger.info(f"开始解析位置信息，md_text长度: {len(md_text)}")
-                        logger.info(f"md_text前500字符: {md_text[:500]}")
-                        
-                        items = parse_md_with_pos(md_text)
-                        logger.info(f"解析出 {len(items)} 个位置信息项")
-                        if items and len(items) > 0:
-                            logger.info(f"前3个位置信息项: {[{item.get('text', 'N/A')[:50] if isinstance(item, dict) else str(item)[:50]} for item in items[:3]]}")
-                        else:
-                            logger.warning("parse_md_with_pos 返回空列表！")
-                            # 添加更多调试信息
-                            logger.warning(f"md_text中是否包含位置标签: {'<sub>pos:' in md_text}")
-                            logger.warning(f"md_text中位置标签数量: {md_text.count('<sub>pos:')}")
-                    else:
-                        items = []
-                        logger.warning("parse_md_with_pos 不可用，无法获取位置信息")
-                
-                except TypeError as e:
-                    if "emit_positions" in str(e):
-                        # 如果不支持emit_positions参数，尝试不带参数调用
-                        logger.warning("to_md_with_pos不支持emit_positions参数，尝试不带参数调用")
-                        doc_input = use_pdf_doc if use_pdf_doc is not None else file_path
-                        md_text = to_md_with_pos(doc_input)
-                        logger.info(f"生成了markdown（不带参数），长度: {len(md_text)}")
-                            
-                        # 解析位置信息
-                        if parse_md_with_pos is not None:
-                            # 添加调试日志
-                            logger.info(f"第二次尝试解析位置信息，md_text长度: {len(md_text)}")
-                            logger.info(f"md_text前500字符: {md_text[:500]}")
-                            
-                            items = parse_md_with_pos(md_text)
-                            logger.info(f"解析出 {len(items)} 个位置信息项")
-                        else:
-                            items = []
-                            logger.warning("parse_md_with_pos 不可用，无法获取位置信息")
-                    else:
-                        raise e
-            else:
-                items = []
-                logger.warning("to_md_with_pos 不可用，无法生成markdown")
-                # 如果to_md_with_pos不可用，我们需要回退到其他方法
-                raise Exception("to_md_with_pos 不可用，无法继续处理")
-            
-            # 使用纯markdown文本进行分块
-            splitter = MarkdownHeaderTextSplitter(headers_to_split_on=CHUNKING_CONFIG['markdown_headers'])
-            chunks = splitter.split_text(md_text)
-            logger.info(f"PyMuPDF4LLM 结构化分块完成，生成 {len(chunks)} 个chunks")
-            
-            # 如果chunks太少，使用更细粒度的分割（仍然基于PyMuPDF4LLM的结果）
-            if len(chunks) < CHUNKING_CONFIG['pymupdf4llm_config']['min_chunks']:
-                logger.info("chunks数量较少，使用更细粒度的分割")
-                # 使用传统分块作为补充，但基于PyMuPDF4LLM的markdown文本
-                text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=DOCUMENT_CONFIG['chunk_size'],
-                    chunk_overlap=DOCUMENT_CONFIG['chunk_overlap'],
-                    length_function=len,
-                    separators=DOCUMENT_CONFIG['splitter_config']['separators'],
-                    keep_separator=DOCUMENT_CONFIG['splitter_config']['keep_separator'],
-                    is_separator_regex=DOCUMENT_CONFIG['splitter_config']['is_separator_regex']
-                )
-                additional_chunks = text_splitter.split_text(md_text)
-                additional_chunks = [Document(page_content=chunk) for chunk in additional_chunks]
-                chunks.extend(additional_chunks)
-                logger.info(f"补充分割后，总chunks数: {len(chunks)}")
-            
-            # 为每个chunk添加位置信息元数据
-            if items and len(items) > 0:
-                logger.info("开始为chunks添加位置信息元数据")
-                for i, chunk in enumerate(chunks):
-                    # 查找与chunk内容最匹配的位置信息
-                    best_match = None
-                    best_score = 0
-                    
-                    for item in items:
-                        if isinstance(item, dict) and 'text' in item and item['text']:
-                            # 计算文本匹配度
-                            chunk_text = chunk.page_content[:100]  # 取前100个字符进行匹配
-                            item_text = item['text'][:100]
-                            
-                            # 简单的文本相似度计算
-                            common_chars = sum(1 for c in chunk_text if c in item_text)
-                            score = common_chars / max(len(chunk_text), len(item_text), 1)
-                            
-                            if score > best_score and score > 0.3:  # 阈值0.3
-                                best_score = score
-                                best_match = item
-                        
-                    if best_match:
-                        # 设置元数据
-                        chunk.metadata.update({
-                            'page_num': best_match.get('page_num', 1),
-                            'char_start': best_match.get('char_start', 0),
-                            'char_end': best_match.get('char_end', 0),
-                            'bbox_union': best_match.get('bbox_union', None),
-                            'bbox_norm': best_match.get('bbox_norm', None)
-                        })
-                        logger.debug(f"Chunk {i} 添加位置信息: page={chunk.metadata.get('page_num')}, bbox={chunk.metadata.get('bbox_union')}")
-                    else:
-                        logger.warning(f"Chunk {i} 未找到匹配的位置信息")
-                        # 设置默认元数据
-                        chunk.metadata.update({
-                            'page_num': 1,
-                            'char_start': 0,
-                            'char_end': 0,
-                            'bbox_union': None,
-                            'bbox_norm': None
-                        })
-            else:
-                logger.warning("没有位置信息项，为所有chunks设置默认元数据")
-                for i, chunk in enumerate(chunks):
-                    chunk.metadata.update({
-                        'page_num': 1,
-                        'char_start': 0,
-                        'char_end': 0,
-                        'bbox_union': None,
-                        'bbox_norm': None
-                    })
-            # 如果to_md_with_pos不可用，回退到LlamaMarkdownReader
-            if to_md_with_pos is None:
-                logger.warning("to_md_with_pos 不可用，回退到LlamaMarkdownReader")
-                reader = LlamaMarkdownReader()
-                md_nodes = reader.load_data(file_path)
-                if isinstance(md_nodes, list):
-                    markdown_text = "\n\n".join(str(n) for n in md_nodes)
-                else:
-                    markdown_text = str(md_nodes)
-
-                splitter = MarkdownHeaderTextSplitter(headers_to_split_on=CHUNKING_CONFIG['markdown_headers'])
-                chunks = splitter.split_text(markdown_text)
-                logger.info(f"LlamaMarkdownReader 分块完成，生成 {len(chunks)} 个chunks")
-                
-                # 为回退的chunks设置默认元数据
-                for i, chunk in enumerate(chunks):
-                    chunk.metadata.update({
-                        'page_num': 1,
-                        'char_start': 0,
-                        'char_end': 0,
-                        'bbox_union': None,
-                        'bbox_norm': None
-                    })
+        if not position_mapping:
+            logger.warning("没有位置信息项，为所有chunks设置默认元数据")
         
-        except Exception as e:
-            logger.error(f"PyMuPDF4LLM 分块失败: {e}")
-            raise Exception(f"PyMuPDF4LLM 分块失败，无法继续处理: {e}")
+        # 使用LangChain进行分块 - 保持适中的分块大小
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1500,  # 适中的分块大小
+            chunk_overlap=300,  # 适中的重叠
+            length_function=len,
+            separators=["\n\n", "\n", "。", "！", "？", ".", "!", "?", " ", ""]
+        )
         
-        # 为每个chunk添加元数据
-        for chunk in chunks:
+        # 创建文档对象
+        doc_obj = Document(page_content=md_text, metadata={"source": file_path})
+        chunks = text_splitter.split_documents([doc_obj])
+        logger.info(f"分块完成，共 {len(chunks)} 个chunks")
+        
+        # 为每个chunk分配位置信息和增强元数据
+        for i, chunk in enumerate(chunks):
+            # 基础元数据
             chunk.metadata.update({
                 "knowledge_id": knowledge_id,
                 "knowledge_name": knowledge_name,
                 "description": description,
-                "tags": tags.split(",") if tags else [],
+                "tags": tags,
                 "effective_time": effective_time,
-                "source_file": original_filename or os.path.basename(file_path),
-                "file_type": Path(file_path).suffix.lower(),
-                "processing_method": "pymupdf4llm_only"  # 标记只使用PyMuPDF4LLM
+                "source_file": original_filename or Path(file_path).name,
+                "chunk_index": i,
+                "chunk_type": "content"
             })
-
-        # 集成：基于 PyMuPDF4LLM 生成"页级定位"与预览
-        try:
-            base_name = os.path.splitext(os.path.basename(file_path))[0]
-            out_dir = os.path.join(os.path.dirname(file_path), f"out_pdfllm_{base_name}")
-            os.makedirs(out_dir, exist_ok=True)
-            if to_md_with_pos is not None and parse_md_with_pos is not None and save_aligned is not None:
-                # 直接传递 Document，可兼容通过 Pro 打开的非PDF源
-                md_text = to_md_with_pos(use_pdf_doc if use_pdf_doc is not None else file_path)
-                md_pos_path = os.path.join(out_dir, "pdfllm_document_with_pos.md")
-                with open(md_pos_path, "w", encoding="utf-8") as f:
-                    f.write(md_text)
-                aligned_path = os.path.join(out_dir, "aligned_positions.json")
-                # 直接传递Markdown文本内容，而不是文件路径
-                items = parse_md_with_pos(md_text)
-                save_aligned(items, aligned_path)
-                # 预览（可选）
-                if draw_preview is not None:
-                    preview_dir = os.path.join(out_dir, "preview")
-                    os.makedirs(preview_dir, exist_ok=True)
-                    draw_preview(file_path, aligned_path, preview_dir)
-                logger.info(f"PDFLLM 定位与预览已生成: {out_dir}")
+            
+            # 增强元数据 - 只保留通用信息
+            chunk.metadata.update({
+                "document_name": original_filename or Path(file_path).name,  # 文档名称
+                "document_type": "文档",  # 文档类型（通用）
+                "keywords": extract_keywords_from_content(chunk.page_content),  # 关键标识词
+            })
+            
+            # 尝试为chunk分配位置信息
+            if position_mapping and len(position_mapping) > 0:
+                # 简化位置匹配逻辑 - 让大模型自己判断
+                chunk_text = chunk.page_content
+                best_match = find_best_position_match(chunk_text, position_mapping)
                 
-                # 直接使用parse_md_with_pos的结果来更新chunks的metadata
-                try:
-                    # items包含了所有带位置信息的文本块
-                    logger.info(f"解析到 {len(items)} 个带位置信息的文本块")
+                if best_match:
+                    # 计算字符范围
+                    char_start = md_text.find(chunk_text)
+                    char_end = char_start + len(chunk_text) if char_start != -1 else -1
                     
-                    # 为每个chunk找到对应的位置信息
-                    for i, chunk in enumerate(chunks):
-                        chunk_text = chunk.page_content[:100]  # 取前100字符作为标识
-                        best_match = None
-                        best_score = 0
-                        
-                        # 在items中查找最匹配的文本块
-                        for item in items:
-                            if isinstance(item, dict) and 'text' in item:
-                                item_text = item['text']
-                                # 计算文本相似度（简单的重叠字符数）
-                                overlap = 0
-                                for char in chunk_text:
-                                    if char in item_text:
-                                        overlap += 1
-                                score = overlap / len(chunk_text) if chunk_text else 0
-                                
-                                if score > best_score and score > 0.3:  # 至少30%重叠
-                                    best_score = score
-                                    best_match = item
-                        
-                        if best_match:
-                            # 从best_match中提取位置信息
-                            page_num = best_match.get('page_num', -1)
-                            bbox = best_match.get('bbox_union', [])
-                            
-                            # 更新chunk的metadata
-                            chunk.metadata.update({
-                                "page_num": page_num,
-                                "bbox_union": bbox,
-                                "char_start": 0,  # 暂时设为0
-                                "char_end": len(chunk.page_content)
-                            })
-                            logger.info(f"Chunk {i} 位置信息更新: page={page_num}, bbox={bbox}, score={best_score:.2f}")
-                        else:
-                            logger.warning(f"Chunk {i} 未找到匹配的位置信息")
-                            
-                except Exception as e:
-                    logger.warning(f"从parse_md_with_pos结果提取位置信息失败: {e}")
-                    
-            else:
-                logger.warning("PDFLLM 定位/预览依赖不可用，跳过该步骤")
-        except Exception as e:
-            logger.warning(f"PDFLLM 定位与预览生成失败: {e}")
-        
-        # 使用极客API生成embedding并存入ES
-        stored_chunks = 0
-        for i, chunk in enumerate(chunks):
-            try:
-                # 生成embedding
-                embedding = get_embedding(chunk.page_content)
-                if embedding is None:
-                    logger.warning(f"chunk {i} embedding生成失败，跳过")
-                    continue
-                
-                # 准备ES文档
-                doc_id = hashlib.md5(f"{knowledge_id}_{i}_{chunk.page_content[:100]}".encode()).hexdigest()
-                
-                # 从chunk metadata中获取位置信息
-                page_num = int(chunk.metadata.get("page_num") or -1)
-                bbox_union = chunk.metadata.get("bbox_union", [])
-                char_start = int(chunk.metadata.get("char_start") or -1)
-                char_end = int(chunk.metadata.get("char_end") or -1)
-                
-                # 添加调试日志
-                logger.info(f"Chunk {i} metadata: page_num={page_num}, bbox_union={bbox_union}, char_start={char_start}, char_end={char_end}")
-                
-                # 如果没有从chunk metadata获取到bbox，则尝试计算页内bbox（仅当有词级索引时）
-                if not bbox_union and page_num > 0 and page_num - 1 < len(page_word_entries):
-                    entries = page_word_entries[page_num - 1]
-                    bbox_union = compute_bbox_union_for_range(entries, char_start, char_end)
-                    logger.info(f"Chunk {i} 计算得到bbox: {bbox_union}")
-
-                # 计算页面尺寸与归一化坐标
-                page_w = page_h = None
-                bbox_norm = []
-                if page_num > 0 and page_num - 1 < len(page_sizes):
-                    page_w, page_h = page_sizes[page_num - 1]
-                if bbox_union and page_w and page_h and page_w > 0 and page_h > 0:
-                    try:
-                        bx0, by0, bx1, by1 = bbox_union
-                        bbox_norm = [round(bx0 / page_w, 6), round(by0 / page_h, 6), round(bx1 / page_w, 6), round(by1 / page_h, 6)]
-                    except Exception:
-                        bbox_norm = []
-
-                es_doc = {
-                    "content": chunk.page_content,
-                    "embedding": embedding,
-                    "knowledge_id": knowledge_id,
-                    "knowledge_name": knowledge_name,
-                    "description": description,
-                    "tags": tags.split(",") if tags else [],
-                    "effective_time": effective_time,
-                    "source_file": original_filename or os.path.basename(file_path),
-                    "file_type": Path(file_path).suffix.lower(),
-                    "processing_method": "pymupdf4llm_only",  # 更新处理方法标记
-                    "chunk_index": i,
-                    "chunk_type": "content",
-                    "weight": 1.0,
-                    "page_num": page_num,
-                    "char_start": char_start,
-                    "char_end": char_end,
-                    "bbox_union": bbox_union,
-                    "page_width": page_w,
-                    "page_height": page_h,
-                    "bbox_norm": bbox_norm
-                }
-                
-                # 存储到ES
-                es_client.index(index=ES_CONFIG['index'], id=doc_id, document=es_doc)
-                stored_chunks += 1
-                logger.info(f"已存储chunk {i+1}/{len(chunks)}")
-                
-            except Exception as e:
-                logger.error(f"存储chunk {i} 失败: {e}")
-                continue
-
-        # 写入知识元信息块（便于检索知识名称/描述/标签/附件名）
-        try:
-            meta_content_parts = [
-                str(knowledge_name or ""),
-                str(description or ""),
-                f"标签: {' '.join(tags.split(',') if tags else [])}",
-                f"附件: {os.path.basename(file_path)}"
-            ]
-            meta_text = "\n".join([p for p in meta_content_parts if p])
-            if meta_text.strip():
-                meta_emb = get_embedding(meta_text)
-                if meta_emb:
-                    meta_id = hashlib.md5(f"meta_{knowledge_id}_{os.path.basename(file_path)}".encode()).hexdigest()
-                    meta_doc = {
-                        "content": meta_text,
-                        "embedding": meta_emb,
-                        "knowledge_id": knowledge_id,
-                        "knowledge_name": knowledge_name,
-                        "description": description,
-                        "tags": tags.split(",") if tags else [],
-                        "effective_time": effective_time,
-                        "source_file": original_filename or os.path.basename(file_path),
-                        "file_type": Path(file_path).suffix.lower(),
-                        "processing_method": "pymupdf_pro",
-                        "chunk_index": -1,
-                        "chunk_type": "knowledge_meta",
-                        "weight": 1.2,
-                        "page_num": -1,
+                    chunk.metadata.update({
+                        "page_num": best_match.get("page", 1),
+                        "bbox_union": best_match.get("bbox", []),
+                        "char_start": char_start,
+                        "char_end": char_end
+                    })
+                    logger.info(f"Chunk {i} 分配位置信息: 页{best_match.get('page', 1)}, bbox={best_match.get('bbox', [])}, chars=({char_start}, {char_end})")
+                else:
+                    logger.warning(f"Chunk {i} 未找到匹配的位置信息")
+                    # 设置默认位置信息
+                    chunk.metadata.update({
+                        "page_num": 1,
+                        "bbox_union": [],
                         "char_start": -1,
                         "char_end": -1
-                    }
-                    es_client.index(index=ES_CONFIG['index'], id=meta_id, document=meta_doc)
-        except Exception as e:
-            logger.warning(f"写入知识元信息块失败: {e}")
+                    })
+            else:
+                # 没有位置信息，设置默认值
+                chunk.metadata.update({
+                    "page_num": 1,
+                    "bbox_union": [],
+                    "char_start": -1,
+                    "char_end": -1
+                })
         
-        logger.info(f"文档处理完成: {file_path}, 生成了 {len(chunks)} 个chunks，成功存储 {stored_chunks} 个chunks")
+        # 生成embeddings并存储到ES
+        chunks_with_embeddings = []
+        for chunk in chunks:
+            try:
+                embedding = get_embedding(chunk.page_content)
+                chunk.metadata["embedding"] = embedding
+                chunks_with_embeddings.append(chunk)
+            except Exception as e:
+                logger.error(f"生成embedding失败: {e}")
+                continue
+        
+        # 存储到ES
+        if chunks_with_embeddings:
+            store_chunks_to_es(chunks_with_embeddings, knowledge_id)
+            logger.info(f"成功存储 {len(chunks_with_embeddings)} 个chunks到ES")
+        else:
+            logger.error("没有可存储的chunks")
+            raise Exception("文档处理失败：没有可存储的chunks")
+        
+        # 清理资源
+        doc.close()
+        if use_pdf_doc != doc:
+            use_pdf_doc.close()
         
         return {
             "success": True,
-            "chunks_count": stored_chunks,
-            "total_text_length": len(full_text),
-            "processing_method": "pymupdf_pro"
+            "chunks_count": len(chunks_with_embeddings),
+            "message": f"文档处理成功: {original_filename or Path(file_path).name}"
         }
         
     except Exception as e:
         logger.error(f"文档处理失败: {e}")
-        raise HTTPException(status_code=500, detail=f"文档处理失败: {str(e)}")
+        raise
+
+def generate_pdfllm_style_markdown(doc, filename: str) -> str:
+    """
+    使用PyMuPDF生成干净的Markdown内容，位置信息不嵌入到文本中
+    """
+    content_lines = []
+    
+    # 添加文档标题
+    content_lines.append(f"# {filename}")
+    content_lines.append("")
+    
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        
+        # 页面标题
+        content_lines.append(f"## 第 {page_num + 1} 页")
+        content_lines.append("")
+        
+        # 获取页面文本块
+        blocks = page.get_text("dict")
+        
+        if "blocks" in blocks:
+            for block_idx, block in enumerate(blocks["blocks"]):
+                if "lines" in block:
+                    block_text = ""
+                    
+                    for line_idx, line in enumerate(block["lines"]):
+                        line_text = ""
+                        
+                        for span_idx, span in enumerate(line["spans"]):
+                            text = span["text"].strip()
+                            if text:
+                                # 只添加文本内容，不添加位置标签
+                                line_text += text + " "
+                        
+                        if line_text.strip():
+                            block_text += line_text.strip() + "\n"
+                    
+                    if block_text.strip():
+                        # 检查是否可能是标题（基于字体大小）
+                        max_font_size = max(span["size"] for line in block["lines"] for span in line["spans"])
+                        if max_font_size > 12:  # 假设大于12pt的是标题
+                            content_lines.append(f"### {block_text.strip()}")
+                        else:
+                            content_lines.append(block_text.strip())
+                        content_lines.append("")
+    
+    # 合并所有内容
+    return "\n".join(content_lines)
+
+def extract_position_mapping(doc) -> List[Dict]:
+    """
+    单独提取位置信息映射，不嵌入到文本内容中
+    """
+    position_mapping = []
+    
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        blocks = page.get_text("dict")
+        
+        if "blocks" in blocks:
+            for block_idx, block in enumerate(blocks["blocks"]):
+                if "lines" in block:
+                    for line_idx, line in enumerate(block["lines"]):
+                        for span_idx, span in enumerate(line["spans"]):
+                            text = span["text"].strip()
+                            if text:
+                                position_mapping.append({
+                                    "text": text,
+                                    "page": page_num + 1,
+                                    "bbox": span["bbox"],
+                                    "font_size": span["size"],
+                                    "font": span["font"],
+                                    "block_idx": block_idx,
+                                    "line_idx": line_idx,
+                                    "span_idx": span_idx
+                                })
+    
+    return position_mapping
+
+def parse_pdfllm_style_markdown(md_text: str) -> List[Dict]:
+    """
+    解析PDFLLM风格的Markdown，提取位置信息
+    """
+    items = []
+    
+    # 匹配 <sub>pos: page=X, bbox=(...)</sub> 格式
+    import re
+    pattern = r'<sub>pos: page=(\d+), bbox=\(([^)]+)\)</sub>'
+    
+    matches = re.findall(pattern, md_text)
+    for match in matches:
+        page_num = int(match[0])
+        bbox_str = match[1]
+        
+        try:
+            # 解析bbox字符串 "x0, y0, x1, y1"
+            bbox_parts = bbox_str.split(',')
+            if len(bbox_parts) == 4:
+                bbox = [float(part.strip()) for part in bbox_parts]
+                
+                # 提取对应的文本内容
+                # 这里简化处理，实际可以根据需要调整
+                items.append({
+                    "page": page_num,
+                    "bbox": bbox,
+                    "char_start": -1,  # 简化处理
+                    "char_end": -1,    # 简化处理
+                    "text": ""          # 简化处理
+                })
+        except Exception as e:
+            logger.warning(f"解析bbox失败: {bbox_str}, 错误: {e}")
+            continue
+                
+    return items
+
+def find_best_position_match(chunk_text: str, position_mapping: List[Dict]) -> Optional[Dict]:
+    """
+    为chunk找到最匹配的位置信息
+    """
+    if not position_mapping:
+        return None
+    
+    # 改进的匹配逻辑：优先匹配包含在chunk中的文本
+    chunk_text_lower = chunk_text.lower()
+    chunk_words = set(chunk_text_lower.split())
+    
+    best_match = None
+    best_score = 0
+    
+    # 第一轮：寻找精确包含的文本
+    for pos_info in position_mapping:
+        text = pos_info.get("text", "").strip()
+        if text and text.lower() in chunk_text_lower:
+            # 计算匹配度：文本长度与chunk长度的比例
+            score = len(text) / max(len(chunk_text), 1)
+            if score > best_score:
+                best_score = score
+                best_match = pos_info
+    
+    # 第二轮：如果没有找到精确包含的，尝试单词匹配
+    if not best_match:
+        for pos_info in position_mapping:
+            text = pos_info.get("text", "").strip()
+            if text:
+                text_words = set(text.lower().split())
+                # 计算单词重叠度
+                overlap = len(chunk_words.intersection(text_words))
+                if overlap > 0:
+                    score = overlap / max(len(chunk_words), 1)
+                    if score > best_score:
+                        best_score = score
+                        best_match = pos_info
+    
+    # 第三轮：如果还是没有找到，返回第一个有效的位置信息
+    if not best_match and position_mapping:
+        for pos_info in position_mapping:
+            if pos_info.get("bbox") and len(pos_info.get("bbox", [])) == 4:
+                return pos_info
+    
+    return best_match
+
+def store_chunks_to_es(chunks: List[Document], knowledge_id: int):
+    """
+    将chunks存储到Elasticsearch
+    """
+    stored_count = 0
+    
+    for i, chunk in enumerate(chunks):
+        try:
+            # 生成文档ID
+            doc_id = hashlib.md5(f"{knowledge_id}_{i}_{chunk.page_content[:100]}".encode()).hexdigest()
+            
+            # 准备ES文档
+            es_doc = {
+                "content": chunk.page_content,
+                "embedding": chunk.metadata.get("embedding", []),
+                "knowledge_id": chunk.metadata.get("knowledge_id", knowledge_id),
+                "knowledge_name": chunk.metadata.get("knowledge_name", ""),
+                "description": chunk.metadata.get("description", ""),
+                "tags": chunk.metadata.get("tags", ""),
+                "effective_time": chunk.metadata.get("effective_time", ""),
+                "source_file": chunk.metadata.get("source_file", ""),
+                "chunk_index": chunk.metadata.get("chunk_index", i),
+                "chunk_type": chunk.metadata.get("chunk_type", "content"),
+                "page_num": chunk.metadata.get("page_num", 1),
+                "char_start": chunk.metadata.get("char_start", -1),
+                "char_end": chunk.metadata.get("char_end", -1),
+                "bbox_union": chunk.metadata.get("bbox_union", []),
+                "weight": 1.0
+            }
+            
+            # 存储到ES
+            es_client.index(index=ES_CONFIG['index'], id=doc_id, document=es_doc)
+            stored_count += 1
+            
+            if (i + 1) % 10 == 0:
+                logger.info(f"已存储 {i + 1}/{len(chunks)} 个chunks")
+                
+        except Exception as e:
+            logger.error(f"存储chunk {i} 失败: {e}")
+            continue
+
+    logger.info(f"ES存储完成，成功存储 {stored_count}/{len(chunks)} 个chunks")
+    return stored_count
 
 @app.post("/api/document/process", response_model=DocumentProcessResponse)
 async def process_document(
@@ -773,174 +696,235 @@ async def process_document(
 @app.post("/api/rag/chat", response_model=ChatResponse)
 def chat_with_rag(request: ChatRequest):
     """
-    基于RAG的智能问答，使用极客智坊API
+    基于知识库的智能问答
     """
-    logger.info(f"RAG对话请求: {request.question}")
+    logger.info(f"RAG聊天请求: {request.question}")
     
     try:
-        # 使用极客API生成问题embedding
+        # 1. 向量搜索找到相关chunks
         question_embedding = get_embedding(request.question)
-        if question_embedding is None:
-            raise HTTPException(status_code=500, detail="问题embedding生成失败")
+        if not question_embedding:
+            return ChatResponse(
+                answer="抱歉，无法生成问题的向量表示，请重试。",
+                references=[],
+                session_id=request.user_id
+            )
         
-        # 混合检索：BM25(知识名/描述/标签/附件名/正文) + 向量余弦
-        search_body = {
-            "size": RAG_CONFIG['top_k'],
+        # 简化搜索逻辑 - 直接返回语义相似度最高的chunks
+        search_query = {
+            "size": 5,  # 返回前5个最相关的chunks
             "query": {
                 "script_score": {
-                    "query": {
-                        "bool": {
-                            "should": [
-                                {
-                                    "multi_match": {
-                                        "query": request.question,
-                                        "fields": [
-                                            "knowledge_name^3",
-                                            "description^2",
-                                            "tags^2",
-                                            "source_file^2",
-                                            "content"
-                                        ],
-                                        "type": "best_fields"
-                                    }
-                                },
-                                { "match": { "content": { "query": request.question, "boost": 1 } } }
-                            ]
-                        }
-                    },
+                    "query": {"match_all": {}},
                     "script": {
-                        "source": "0.6 * cosineSimilarity(params.qvec, 'embedding') * (doc['weight'].size()!=0?doc['weight'].value:1.0) + 0.4 * _score",
-                        "params": { "qvec": question_embedding }
+                        "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
+                        "params": {"query_vector": question_embedding}
                     }
                 }
-            }
+            },
+            "_source": ["content", "metadata", "knowledge_id", "knowledge_name", "source_file", 
+                       "page_num", "chunk_index", "bbox_union", "char_start", "char_end"]
         }
         
-        response = es_client.search(index=ES_CONFIG['index'], body=search_body)
+        search_response = es_client.search(index=ES_CONFIG['index'], body=search_query)
+        hits = search_response.get('hits', {}).get('hits', [])
         
-        # 处理搜索结果
-        docs_with_scores = []
-        for hit in response['hits']['hits']:
-            src = hit.get('_source', {})
-            doc_content = src.get('content', '')
-            score = float(hit.get('_score', 0.0))
-            # 兜底清洗，避免 None 传入 Pydantic 模型
-            metadata = {
-                "knowledge_id": int(src.get("knowledge_id") or 0),
-                "knowledge_name": str(src.get("knowledge_name") or "未知"),
-                "description": str(src.get("description") or ""),
-                "tags": src.get("tags") or [],
-                "effective_time": str(src.get("effective_time") or ""),
-                "attachments": src.get("attachments") or [],
-                "source_file": src.get("source_file"),
-                "page_num": src.get("page_num"),
-                "chunk_index": src.get("chunk_index"),
-                "chunk_type": src.get("chunk_type"),
-                "bbox_union": src.get("bbox_union"),
-                "char_start": src.get("char_start"),
-                "char_end": src.get("char_end"),
+        if not hits:
+            return ChatResponse(
+                answer="抱歉，在知识库中没有找到相关信息。",
+                references=[],
+                session_id=request.user_id
+            )
+        
+        # 2. 构建增强的上下文信息
+        context_chunks = []
+        for hit in hits:
+            source = hit['_source']
+            score = hit['_score']
+            
+            # 构建每个chunk的完整上下文信息
+            chunk_info = {
+                "content": source.get('content', ''),
+                "metadata": {
+                    "document_name": source.get('source_file', 'N/A'),
+                    "document_type": "文档",  # 通用文档类型
+                    "page_num": source.get('page_num', 'N/A'),
+                    "chunk_index": source.get('chunk_index', 'N/A'),
+                    "bbox_union": source.get('bbox_union', []),
+                    "char_start": source.get('char_start', 'N/A'),
+                    "char_end": source.get('char_end', 'N/A'),
+                    "knowledge_name": source.get('knowledge_name', 'N/A'),
+                    "relevance_score": round(score, 3)
+                }
             }
-            doc = Document(page_content=doc_content, metadata=metadata)
-            docs_with_scores.append((doc, score))
+            context_chunks.append(chunk_info)
         
-        # 构建知识引用
+        # 3. 构建增强的RAG提示词
+        enhanced_prompt = build_enhanced_rag_prompt(request.question, context_chunks)
+        
+        # 4. 调用大模型生成答案
+        answer = generate_ai_answer(enhanced_prompt)
+        
+        # 5. 构建引用信息
         references = []
-        context_parts = []
-        
-        for doc, score in docs_with_scores:
-            # 构建知识引用
-            reference = KnowledgeReference(
-                knowledge_id=doc.metadata.get("knowledge_id", 0),
-                knowledge_name=doc.metadata.get("knowledge_name", "未知"),
-                description=doc.metadata.get("description", ""),
-                tags=doc.metadata.get("tags", []),
-                effective_time=doc.metadata.get("effective_time", ""),
-                attachments=doc.metadata.get("attachments", []),
-                relevance=float(score),
-                source_file=doc.metadata.get("source_file"),
-                page_num=doc.metadata.get("page_num"),
-                chunk_index=doc.metadata.get("chunk_index"),
-                chunk_type=doc.metadata.get("chunk_type"),
-                bbox_union=doc.metadata.get("bbox_union"),
-                char_start=doc.metadata.get("char_start"),
-                char_end=doc.metadata.get("char_end")
-            )
-            references.append(reference)
-            
-            # 添加到上下文
-            pos = ""
-            if doc.metadata.get("page_num") not in (None, -1):
-                pos = f" (第{doc.metadata.get('page_num')}页)"
-            context_parts.append(
-                f"文档: {doc.metadata.get('knowledge_name', '未知')} - {doc.metadata.get('source_file', '')}{pos}\n内容: {doc.page_content}"
-            )
-        
-        # 构建完整上下文
-        context = "\n\n".join(context_parts)
-        
-        # 构建提示词
-        prompt = f"""基于以下检索到的相关文档信息，请回答用户的问题。
-
-相关文档信息：
-{context}
-
-用户问题：{request.question}
-
-请基于上述文档信息，为用户提供准确、详细的回答。如果文档信息不足以回答问题，请说明情况。"""
-
-        # 调用极客智坊API
-        try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {GEEKAI_API_KEY}"
-            }
-            
-            payload = {
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "你是一个专业的知识库助手，基于提供的文档信息回答用户问题。"
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                "max_tokens": 1000,
-                "temperature": 0.7
-            }
-            
-            response = requests.post(
-                GEEKAI_CHAT_URL,
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                answer = result['choices'][0]['message']['content']
-                logger.info("极客智坊API调用成功")
-            else:
-                logger.warning(f"极客智坊API调用失败: {response.status_code}")
-                # 回退到模拟回答
-                answer = f"基于检索到的相关文档，我为您提供以下信息：\n\n{context}\n\n这是基于RAG系统生成的回答。"
-                
-        except Exception as e:
-            logger.error(f"极客智坊API调用异常: {e}")
-            # 回退到模拟回答
-            answer = f"基于检索到的相关文档，我为您提供以下信息：\n\n{context}\n\n这是基于RAG系统生成的回答。"
+        for chunk in context_chunks:
+            metadata = chunk['metadata']
+            references.append(KnowledgeReference(
+                knowledge_id=0,  # 这里需要从chunk中获取
+                knowledge_name=metadata.get('knowledge_name', ''),
+                description=f"文档: {metadata.get('document_name', '')}",
+                tags=[metadata.get('document_type', '')],
+                effective_time="",
+                attachments=[metadata.get('document_name', '')],
+                relevance=metadata.get('relevance_score', 0.0),
+                source_file=metadata.get('document_name', ''),
+                page_num=metadata.get('page_num', 0),
+                chunk_index=metadata.get('chunk_index', 0),
+                chunk_type="content",
+                bbox_union=metadata.get('bbox_union', []),
+                char_start=metadata.get('char_start', 0),
+                char_end=metadata.get('char_end', 0)
+            ))
         
         return ChatResponse(
             answer=answer,
             references=references,
-            session_id=f"session_{hash(request.question) % 10000}"
+            session_id=request.user_id
         )
         
     except Exception as e:
-        logger.error(f"RAG对话失败: {e}")
-        raise HTTPException(status_code=500, detail=f"RAG对话失败: {str(e)}")
+        logger.error(f"RAG聊天失败: {e}")
+        return ChatResponse(
+            answer=f"抱歉，处理您的问题时出现错误：{str(e)}",
+            references=[],
+            session_id=request.user_id
+        )
+
+def build_enhanced_rag_prompt(question: str, context_chunks: List[Dict]) -> str:
+    """
+    构建增强的RAG提示词，让大模型能看到完整的上下文信息
+    """
+    context_parts = []
+    
+    for i, chunk in enumerate(context_chunks):
+        metadata = chunk['metadata']
+        
+        # 构建每个chunk的详细上下文信息
+        chunk_context = f"""
+=== 引用 {i+1} ===
+📄 文档名称: {metadata.get('document_name', 'N/A')}
+📋 文档类型: {metadata.get('document_type', 'N/A')}
+📖 页码: {metadata.get('page_num', 'N/A')}
+🔢 块序: {metadata.get('chunk_index', 'N/A')}
+🎯 相关性: {metadata.get('relevance_score', 'N/A')}
+📍 坐标: {metadata.get('bbox_union', [])}
+📝 内容: {chunk.get('content', '')}
+"""
+        context_parts.append(chunk_context)
+    
+    # 构建完整提示
+    prompt = f"""
+你是一个专业的文档知识助手。请基于以下信息回答问题。
+
+每个引用都包含了完整的文档信息，包括：
+- 文档名称和类型
+- 页码和块序
+- 相关性评分和位置坐标
+- 具体内容
+
+请仔细分析这些信息，并根据问题找到最准确的答案。
+
+问题: {question}
+
+参考信息:
+{''.join(context_parts)}
+
+请根据问题，从上述信息中找到最准确的答案。要求：
+1. 直接回答问题，不要说"请查看引用信息"
+2. 如果问题涉及特定文档，请确保答案来自正确的文档
+3. 如果问题没有指定具体文档，请基于所有相关信息给出综合回答
+4. 答案要具体、准确，包含关键数据
+5. 用中文回答，并说明信息来源（如"根据文档第X页"）
+
+请开始回答：
+"""
+    
+    return prompt
+
+def generate_ai_answer(prompt: str) -> str:
+    """
+    调用大模型生成答案
+    """
+    try:
+        # 调用极客智坊API生成答案
+        headers = {
+            "Authorization": f"Bearer {GEEKAI_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "gpt-4o-mini",  # 使用合适的模型
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "你是一个专业的文档知识助手，请基于提供的文档信息准确回答问题。"
+                },
+                {
+                    "role": "user", 
+                    "content": prompt
+                }
+            ],
+            "max_tokens": 1000,
+            "temperature": 0.3
+        }
+        
+        response = requests.post(
+            GEEKAI_CHAT_URL,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if "choices" in result and len(result["choices"]) > 0:
+                answer = result["choices"][0]["message"]["content"]
+                return answer
+            else:
+                logger.error(f"API响应格式异常: {result}")
+                return "抱歉，生成答案时出现格式错误，请重试。"
+        else:
+            logger.error(f"API调用失败: {response.status_code}, {response.text}")
+            return f"抱歉，API调用失败（状态码：{response.status_code}），请重试。"
+            
+    except requests.exceptions.Timeout:
+        logger.error("API调用超时")
+        return "抱歉，生成答案超时，请重试。"
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API请求异常: {e}")
+        return f"抱歉，API请求异常：{str(e)}，请重试。"
+    except Exception as e:
+        logger.error(f"生成AI答案失败: {e}")
+        return f"抱歉，生成答案时出现错误：{str(e)}，请重试。"
+
+def extract_keywords_from_content(content: str) -> List[str]:
+    """从内容提取关键标识词（通用版本）"""
+    keywords = []
+    content_lower = content.lower()
+    
+    # 通用关键词
+    general_keywords = ["投资", "管理", "风险", "收益", "费用", "日期", "目标", "策略", "报告", "分析"]
+    for keyword in general_keywords:
+        if keyword in content_lower:
+            keywords.append(keyword)
+    
+    # 文档结构关键词
+    structure_keywords = ["标题", "章节", "表格", "图表", "附录", "摘要", "结论"]
+    for keyword in structure_keywords:
+        if keyword in content_lower:
+            keywords.append(keyword)
+    
+    return keywords[:8]  # 限制关键词数量
 
 @app.get("/api/health")
 def health_check():
