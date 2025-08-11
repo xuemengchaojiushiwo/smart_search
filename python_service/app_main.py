@@ -300,17 +300,34 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
     logger.info(f"开始统一处理文档: {file_path}")
     
     try:
-        # 使用 PyMuPDF Pro 打开文档
+        # 使用 PyMuPDF / Pro 打开文档
         doc = pymupdf.open(file_path)
-        logger.info(f"成功打开文档，页数: {len(doc)}")
+        logger.info(f"成功打开文档，页数: {len(doc)}，is_reflowable={getattr(doc, 'is_reflowable', False)}")
+
+        # 对非PDF或可重排文档，先转换为标准PDF，便于稳定获取页码与坐标
+        input_suffix = Path(file_path).suffix.lower()
+        use_pdf_doc = doc
+        try:
+            if input_suffix != ".pdf" or getattr(doc, "is_reflowable", False):
+                logger.info("检测到非PDF或可重排文档，开始转换为PDF…")
+                pdf_bytes = doc.convert_to_pdf()
+                use_pdf_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+                logger.info(f"转换完成，PDF页数: {len(use_pdf_doc)}")
+        except Exception as e:
+            logger.warning(f"转换PDF失败，回退使用原文档提取：{e}")
         
-        # 提取文本（页粒度），同时构建词级索引，便于后续 chunk bbox 计算
+        # 提取文本（页粒度），同时构建词级索引与页面尺寸，便于后续 chunk bbox 计算与归一化
         page_texts: List[str] = []
         page_word_entries: List[List[tuple]] = []
-        for page_num, page in enumerate(doc):
+        page_sizes: List[tuple] = []  # (width, height)
+        for page_num, page in enumerate(use_pdf_doc):
             p_text, p_entries = build_page_text_and_word_index(page)
             page_texts.append(p_text or "")
             page_word_entries.append(p_entries or [])
+            try:
+                page_sizes.append((float(page.rect.width), float(page.rect.height)))
+            except Exception:
+                page_sizes.append((0.0, 0.0))
         full_text = "\n\n".join(page_texts)
         logger.info(f"文本提取完成，总字符数: {len(full_text)}")
         
@@ -406,7 +423,8 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
             out_dir = os.path.join(os.path.dirname(file_path), f"out_pdfllm_{base_name}")
             os.makedirs(out_dir, exist_ok=True)
             if to_md_with_pos is not None and parse_md_with_pos is not None and save_aligned is not None:
-                md_text = to_md_with_pos(file_path, emit_positions=True)
+                # 直接传递 Document，可兼容通过 Pro 打开的非PDF源
+                md_text = to_md_with_pos(use_pdf_doc if use_pdf_doc is not None else file_path, emit_positions=True)
                 md_pos_path = os.path.join(out_dir, "pdfllm_document_with_pos.md")
                 with open(md_pos_path, "w", encoding="utf-8") as f:
                     f.write(md_text)
@@ -443,6 +461,18 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
                     entries = page_word_entries[page_num - 1]
                     bbox_union = compute_bbox_union_for_range(entries, int(chunk.metadata.get("char_start") or 0), int(chunk.metadata.get("char_end") or 0))
 
+                # 计算页面尺寸与归一化坐标
+                page_w = page_h = None
+                bbox_norm = []
+                if page_num > 0 and page_num - 1 < len(page_sizes):
+                    page_w, page_h = page_sizes[page_num - 1]
+                if bbox_union and page_w and page_h and page_w > 0 and page_h > 0:
+                    try:
+                        bx0, by0, bx1, by1 = bbox_union
+                        bbox_norm = [round(bx0 / page_w, 6), round(by0 / page_h, 6), round(bx1 / page_w, 6), round(by1 / page_h, 6)]
+                    except Exception:
+                        bbox_norm = []
+
                 es_doc = {
                     "content": chunk.page_content,
                     "embedding": embedding,
@@ -460,7 +490,10 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
                     "page_num": page_num,
                     "char_start": int(chunk.metadata.get("char_start") or -1),
                     "char_end": int(chunk.metadata.get("char_end") or -1),
-                    "bbox_union": bbox_union
+                        "bbox_union": bbox_union,
+                        "page_width": page_w,
+                        "page_height": page_h,
+                        "bbox_norm": bbox_norm
                 }
                 
                 # 存储到ES
