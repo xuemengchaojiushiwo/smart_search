@@ -74,8 +74,13 @@ CREATE TABLE IF NOT EXISTS knowledge_versions (
     tags JSON COMMENT '标签列表',
     effective_start_time DATETIME COMMENT '生效开始时间',
     effective_end_time DATETIME COMMENT '生效结束时间',
+    status TINYINT DEFAULT 1 COMMENT '状态：1-生效，0-失效',
     created_by VARCHAR(50) NOT NULL COMMENT '创建人',
     created_time DATETIME NOT NULL COMMENT '创建时间',
+    updated_by VARCHAR(50) COMMENT '更新人',
+    updated_time DATETIME COMMENT '更新时间',
+    search_count INT DEFAULT 0 COMMENT '搜索次数',
+    download_count INT DEFAULT 0 COMMENT '下载次数',
     change_reason VARCHAR(500) COMMENT '变更原因',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识'
 );
@@ -88,6 +93,9 @@ CREATE TABLE IF NOT EXISTS attachments (
     file_path VARCHAR(500) NOT NULL COMMENT '文件路径',
     file_size BIGINT NOT NULL COMMENT '文件大小(字节)',
     file_type VARCHAR(50) COMMENT '文件类型',
+    file_hash VARCHAR(64) COMMENT '文件内容哈希',
+    version_id BIGINT COMMENT '关联的知识版本ID',
+    version_number INT COMMENT '版本号',
     upload_time DATETIME NOT NULL COMMENT '上传时间',
     download_count INT DEFAULT 0 COMMENT '下载次数',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识'

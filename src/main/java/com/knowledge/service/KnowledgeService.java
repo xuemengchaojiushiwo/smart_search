@@ -170,17 +170,16 @@ public class KnowledgeService {
      * 搜索知识
      */
     public IPage<KnowledgeVO> searchKnowledge(String query, int page, int size) {
-        // 使用ES搜索
-        List<com.knowledge.vo.ElasticsearchResultVO> esResults = elasticsearchService.searchKnowledge(query, (page - 1) * size, size);
-        
-        // 转换为VO
+        // 仅使用ES搜索，失败直接抛出异常
+        List<com.knowledge.vo.ElasticsearchResultVO> esResults = elasticsearchService
+            .searchKnowledge(query, (page - 1) * size, size);
+
         List<KnowledgeVO> vos = esResults.stream()
             .map(esResult -> {
                 KnowledgeVO vo = new KnowledgeVO();
                 vo.setId(esResult.getId());
                 vo.setName(esResult.getTitle());
                 vo.setDescription(esResult.getContent());
-                // 转换categoryId
                 if (esResult.getCategoryId() != null) {
                     try {
                         vo.setCategoryId(Long.valueOf(esResult.getCategoryId()));
@@ -188,7 +187,6 @@ public class KnowledgeService {
                         log.warn("无法转换categoryId: {}", esResult.getCategoryId());
                     }
                 }
-                // 转换tags
                 if (esResult.getTags() != null) {
                     vo.setTags(java.util.Arrays.asList(esResult.getTags().split(",")));
                 }
@@ -196,12 +194,10 @@ public class KnowledgeService {
                 return vo;
             })
             .collect(Collectors.toList());
-        
-        // 构建分页结果
+
         Page<KnowledgeVO> result = new Page<>(page, size);
         result.setRecords(vos);
         result.setTotal(elasticsearchService.getSearchCount(query));
-        
         return result;
     }
     
@@ -315,13 +311,22 @@ public class KnowledgeService {
             }
             
             // 调用Python服务处理文档
+            String effectiveTime = null;
+            if (knowledge.getEffectiveStartTime() != null || knowledge.getEffectiveEndTime() != null) {
+                String startTime = knowledge.getEffectiveStartTime() != null ? 
+                    knowledge.getEffectiveStartTime().toString() : "未设置";
+                String endTime = knowledge.getEffectiveEndTime() != null ? 
+                    knowledge.getEffectiveEndTime().toString() : "未设置";
+                effectiveTime = startTime + " - " + endTime;
+            }
+            
             Map<String, Object> result = pythonService.processDocument(
                 file,
                 knowledgeId,
                 knowledge.getName(),
                 knowledge.getDescription(),
                 knowledge.getTags(),
-                knowledge.getEffectiveStartTime() + " - " + knowledge.getEffectiveEndTime()
+                effectiveTime
             );
             
             log.info("知识文档处理成功: knowledgeId={}, fileName={}", knowledgeId, file.getOriginalFilename());

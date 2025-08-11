@@ -36,7 +36,7 @@ from langchain.schema import Document
 
 # PyMuPDF4LLM 用于结构化分块
 try:
-    from pymupdf4llm import LlamaMarkdownReader
+    from mypymupdf4llm import LlamaMarkdownReader
     PYMUPDF4LLM_AVAILABLE = True
 except ImportError:
     print("⚠️ PyMuPDF4LLM 不可用，将使用传统分块")
@@ -163,7 +163,7 @@ class PyMuPDFProChunkingTester:
                         ]
                     )
                     chunks = splitter.split_text(markdown_text)
-                    processing_method = "pymupdf4llm"
+                    processing_method = "mypymupdf4llm"
                     print(f"✅ PyMuPDF4LLM 结构化分块完成，生成 {len(chunks)} 个chunks")
                     
                 except Exception as e:

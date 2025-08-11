@@ -148,6 +148,18 @@ public class ChatController {
                         kr.setEffectiveTime((String) ref.get("effective_time"));
                         kr.setAttachments((List<String>) ref.get("attachments"));
                         kr.setRelevance(Double.valueOf(ref.get("relevance").toString()));
+                        // 溯源字段（可选）
+                        if (ref.get("source_file") != null) kr.setSourceFile(ref.get("source_file").toString());
+                        if (ref.get("page_num") != null) kr.setPageNum(Integer.valueOf(ref.get("page_num").toString()));
+                        if (ref.get("chunk_index") != null) kr.setChunkIndex(Integer.valueOf(ref.get("chunk_index").toString()));
+                        if (ref.get("chunk_type") != null) kr.setChunkType(ref.get("chunk_type").toString());
+                        if (ref.get("bbox_union") != null) {
+                            @SuppressWarnings("unchecked")
+                            List<Double> bbox = (List<Double>) ref.get("bbox_union");
+                            kr.setBboxUnion(bbox);
+                        }
+                        if (ref.get("char_start") != null) kr.setCharStart(Integer.valueOf(ref.get("char_start").toString()));
+                        if (ref.get("char_end") != null) kr.setCharEnd(Integer.valueOf(ref.get("char_end").toString()));
                         return kr;
                     })
                     .collect(Collectors.toList());

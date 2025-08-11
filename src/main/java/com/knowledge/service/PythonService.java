@@ -120,40 +120,36 @@ public class PythonService {
     /**
      * 调用Python服务处理文档
      */
-    public Map<String, Object> processDocument(MultipartFile file, Long knowledgeId, String knowledgeName, 
+    public Map<String, Object> processDocument(MultipartFile file, Long knowledgeId, String knowledgeName,
                                               String description, String tags, String effectiveTime) {
         try {
             String url = pythonServiceUrl + "/api/document/process";
-            
-            // 构建multipart请求
+
+            // 外层 multipart 头
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-            
-            // 创建multipart body
-            org.springframework.core.io.ByteArrayResource fileResource = 
-                new org.springframework.core.io.ByteArrayResource(file.getBytes()) {
-                    @Override
-                    public String getFilename() {
-                        return file.getOriginalFilename();
-                    }
-                };
-            
-            org.springframework.http.HttpEntity<org.springframework.core.io.Resource> fileEntity = 
-                new org.springframework.http.HttpEntity<>(fileResource, headers);
-            
-            // 构建请求参数
-            Map<String, Object> body = new HashMap<>();
-            body.put("file", fileEntity);
-            body.put("knowledge_id", knowledgeId);
-            body.put("knowledge_name", knowledgeName);
-            body.put("description", description);
-            body.put("tags", tags);
-            body.put("effective_time", effectiveTime);
-            
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
-            
+
+            // 文件资源（不要给文件部分设置 multipart 头，由 RestTemplate 统一封装）
+            org.springframework.core.io.ByteArrayResource fileResource = new org.springframework.core.io.ByteArrayResource(file.getBytes()) {
+                @Override
+                public String getFilename() {
+                    return file.getOriginalFilename();
+                }
+            };
+
+            // 使用 LinkedMultiValueMap 正确构造 multipart 表单
+            org.springframework.util.LinkedMultiValueMap<String, Object> form = new org.springframework.util.LinkedMultiValueMap<>();
+            form.add("file", fileResource);
+            if (knowledgeId != null) form.add("knowledge_id", String.valueOf(knowledgeId));
+            if (knowledgeName != null) form.add("knowledge_name", knowledgeName);
+            if (description != null) form.add("description", description);
+            if (tags != null) form.add("tags", tags);
+            if (effectiveTime != null) form.add("effective_time", effectiveTime);
+
+            HttpEntity<org.springframework.util.LinkedMultiValueMap<String, Object>> request = new HttpEntity<>(form, headers);
+
             ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-            
+
             if (response.getStatusCode() == HttpStatus.OK) {
                 Map<String, Object> result = JSON.parseObject(response.getBody(), Map.class);
                 log.info("文档处理成功: {}", file.getOriginalFilename());

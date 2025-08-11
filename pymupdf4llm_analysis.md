@@ -36,9 +36,10 @@ PyMuPDF4LLM 主要提供以下功能：
 ### 分块优势
 
 #### 1. 结构化分块
+
 ```python
 # PyMuPDF4LLM 的分块策略
-from pymupdf4llm import LlamaMarkdownReader
+from mypymupdf4llm import LlamaMarkdownReader
 
 reader = LlamaMarkdownReader()
 # 会保持文档的语义结构
@@ -73,8 +74,9 @@ reader = LlamaMarkdownReader()
 ## 建议的改进方案
 
 ### 方案1: 完全采用PyMuPDF4LLM (推荐)
+
 ```python
-from pymupdf4llm import LlamaMarkdownReader
+from mypymupdf4llm import LlamaMarkdownReader
 from langchain.text_splitter import MarkdownHeaderTextSplitter
 
 # 对于PDF文件

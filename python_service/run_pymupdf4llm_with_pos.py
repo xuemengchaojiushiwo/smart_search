@@ -4,7 +4,7 @@ import sys
 # 确保本地源代码包可被导入
 sys.path.insert(0, os.path.abspath('.'))
 try:
-    from pymupdf4llm.helpers.pymupdf_rag import to_markdown
+    from mypymupdf4llm.helpers.pymupdf_rag import to_markdown
 except Exception:
     from PYMUPDF4LLM.helpers.pymupdf_rag import to_markdown
 

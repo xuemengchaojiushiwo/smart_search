@@ -18,7 +18,7 @@ public class KnowledgeDTO {
     @NotNull(message = "类目ID不能为空")
     private Long categoryId;
 
-    private List<String> tags;
+    private String tags;
 
     private LocalDateTime effectiveStartTime;
 

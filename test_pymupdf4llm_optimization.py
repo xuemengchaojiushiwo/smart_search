@@ -18,7 +18,7 @@ from config import DOCUMENT_CONFIG, CHUNKING_CONFIG
 
 # 尝试导入PyMuPDF4LLM
 try:
-    from pymupdf4llm import LlamaMarkdownReader
+    from mypymupdf4llm import LlamaMarkdownReader
     PYMUPDF4LLM_AVAILABLE = True
 except ImportError:
     PYMUPDF4LLM_AVAILABLE = False

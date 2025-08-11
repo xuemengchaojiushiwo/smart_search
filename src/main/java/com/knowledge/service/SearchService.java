@@ -62,28 +62,10 @@ public class SearchService {
 
     // 获取搜索建议
     public List<String> getSearchSuggestions(String query) {
-        try {
-            // 调用ES的suggest功能
-            List<String> suggestions = elasticsearchService.getSearchSuggestions(query);
-            log.info("获取搜索建议成功: query={}, suggestions={}", query, suggestions);
-            return suggestions;
-        } catch (Exception e) {
-            log.error("获取搜索建议失败: query={}", query, e);
-            // 如果ES不可用，返回基于历史搜索的建议
-            return getSuggestionsFromHistory(query);
-        }
-    }
-    
-    // 从历史搜索中获取建议
-    private List<String> getSuggestionsFromHistory(String query) {
-        try {
-            List<String> suggestions = searchHistoryService.getSuggestionsFromHistory(query, 5);
-            log.info("从历史搜索获取建议: query={}, suggestions={}", query, suggestions);
-            return suggestions;
-        } catch (Exception e) {
-            log.error("从历史搜索获取建议失败: query={}", query, e);
-            return new ArrayList<>();
-        }
+        // 仅调用ES，失败直接抛出
+        List<String> suggestions = elasticsearchService.getSearchSuggestions(query);
+        log.info("获取搜索建议成功: query={}, suggestions={}", query, suggestions);
+        return suggestions;
     }
 
     // 获取推荐问题

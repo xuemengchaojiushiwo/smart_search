@@ -56,4 +56,12 @@ public class AuthController {
 
         return ApiResponse.success("登录成功", response);
     }
+
+    @PostMapping("/logout")
+    @Operation(summary = "退出登录", description = "用户退出登录，客户端应清除本地token")
+    public ApiResponse<Void> logout(@RequestHeader(value = "Authorization", required = false) String authorization) {
+        log.info("用户退出登录: token={}", authorization);
+        // 当前无服务端token状态，前端清除即可
+        return ApiResponse.success("退出成功", null);
+    }
 }

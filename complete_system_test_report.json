@@ -1,0 +1,26 @@
+{
+  "category_management": {
+    "create_category": false,
+    "get_categories": false,
+    "update_category": false,
+    "delete_category": false,
+    "category_id": null
+  },
+  "knowledge_management": {
+    "create_knowledge": false,
+    "get_knowledge": false,
+    "update_knowledge": false,
+    "delete_knowledge": false,
+    "knowledge_id": null
+  },
+  "search_functionality": {
+    "basic_search": false,
+    "advanced_search": false,
+    "search_suggestions": false
+  },
+  "elasticsearch_integration": {
+    "es_health": false,
+    "es_search": false,
+    "es_index_info": false
+  }
+}

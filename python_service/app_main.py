@@ -19,6 +19,10 @@ import requests
 # PyMuPDF Pro 统一文档处理
 from pymupdf_font_fix import setup_pymupdf_pro_environment, test_pymupdf_pro_initialization
 
+# 添加当前目录到Python路径，以便导入本地包
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
 # 为 PyMuPDF Pro 准备一个ASCII安全的字体目录，避免中文路径问题
 SAFE_FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts_tmp")
 os.makedirs(SAFE_FONT_DIR, exist_ok=True)
@@ -65,36 +69,33 @@ import json
 
 # PyMuPDF4LLM 用于结构化分块
 try:
-    from pymupdf4llm import LlamaMarkdownReader
+    from mypymupdf4llm import LlamaMarkdownReader
     PYMUPDF4LLM_AVAILABLE = True
-except ImportError:
+    print("✅ 成功导入 mypymupdf4llm.LlamaMarkdownReader")
+except ImportError as e:
     PYMUPDF4LLM_AVAILABLE = False
-    logging.warning("PyMuPDF4LLM 不可用，将使用传统分块")
+    print(f"❌ PyMuPDF4LLM 不可用: {e}，将使用传统分块")
 
-# 引入基于本地 pymupdf4llm 的定位与预览能力
+# 引入基于本地 mypymupdf4llm 的定位与预览能力
 try:
     # 生成带 <sub>pos: ...</sub> 的 Markdown
-    from pymupdf4llm.helpers.pymupdf_rag import to_markdown as to_md_with_pos
-except Exception:
+    from mypymupdf4llm.helpers.pymupdf_rag import to_markdown as to_md_with_pos
+    print("✅ 成功导入 mypymupdf4llm.helpers.pymupdf_rag.to_markdown")
+except Exception as e:
+    print(f"❌ 导入 mypymupdf4llm.helpers.pymupdf_rag.to_markdown 失败: {e}")
     to_md_with_pos = None
 
 try:
     # 解析带位置的 Markdown → aligned_positions
-    from python_service.md_pos_to_aligned import parse_md_with_pos, save_aligned
+    from md_pos_to_aligned import parse_md_with_pos, save_aligned
 except Exception:
-    try:
-        from .md_pos_to_aligned import parse_md_with_pos, save_aligned
-    except Exception:
-        parse_md_with_pos = save_aligned = None
+    parse_md_with_pos = save_aligned = None
 
 try:
     # 生成预览 PNG
-    from python_service.preview_alignment import draw_preview
+    from preview_alignment import draw_preview
 except Exception:
-    try:
-        from .preview_alignment import draw_preview
-    except Exception:
-        draw_preview = None
+    draw_preview = None
 
 # ES相关
 from elasticsearch import Elasticsearch
@@ -293,7 +294,7 @@ def validate_ldap_user(request: LdapValidateRequest):
         )
 
 def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: str, 
-                           description: str, tags: str, effective_time: str):
+                           description: str, tags: str, effective_time: str, original_filename: str = None):
     """
     使用 PyMuPDF Pro + PyMuPDF4LLM 统一处理文档
     """
@@ -331,13 +332,160 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
         full_text = "\n\n".join(page_texts)
         logger.info(f"文本提取完成，总字符数: {len(full_text)}")
         
-        # 使用 PyMuPDF4LLM 进行结构化分块
+        # 使用 PyMuPDF4LLM 进行结构化分块（强制使用，不使用回退）
         chunks: List[Document] = []
-        if PYMUPDF4LLM_AVAILABLE:
-            try:
+        if not PYMUPDF4LLM_AVAILABLE:
+            raise Exception("PyMuPDF4LLM 不可用，无法进行文档分块")
+        
+        try:
+            # 首先生成带位置信息的markdown
+            if to_md_with_pos is not None:
+                try:
+                    # 尝试不同的调用方式，首先尝试带emit_positions参数
+                    try:
+                        # 确保传递正确的参数类型
+                        doc_input = use_pdf_doc if use_pdf_doc is not None else file_path
+                        md_text = to_md_with_pos(doc_input, emit_positions=True)
+                        logger.info(f"生成了带位置信息的markdown（使用emit_positions=True），长度: {len(md_text)}")
+                        
+                        # 检查是否真的生成了位置信息
+                        if '<sub>pos:' in md_text:
+                            logger.info(f"✅ 成功生成位置标签，数量: {md_text.count('<sub>pos:')}")
+                        else:
+                            logger.warning("⚠️ 虽然使用了emit_positions=True，但没有生成位置标签")
+                            
+                    except TypeError as e:
+                        # 如果不支持emit_positions参数，尝试不带参数调用
+                        logger.warning(f"to_md_with_pos不支持emit_positions参数: {e}，尝试不带参数调用")
+                        doc_input = use_pdf_doc if use_pdf_doc is not None else file_path
+                        md_text = to_md_with_pos(doc_input)
+                        logger.info(f"生成了markdown（不带参数），长度: {len(md_text)}")
+                    
+                    # 解析位置信息
+                    if parse_md_with_pos is not None:
+                        # 添加调试日志
+                        logger.info(f"开始解析位置信息，md_text长度: {len(md_text)}")
+                        logger.info(f"md_text前500字符: {md_text[:500]}")
+                        
+                        items = parse_md_with_pos(md_text)
+                        logger.info(f"解析出 {len(items)} 个位置信息项")
+                        if items and len(items) > 0:
+                            logger.info(f"前3个位置信息项: {[{item.get('text', 'N/A')[:50] if isinstance(item, dict) else str(item)[:50]} for item in items[:3]]}")
+                        else:
+                            logger.warning("parse_md_with_pos 返回空列表！")
+                            # 添加更多调试信息
+                            logger.warning(f"md_text中是否包含位置标签: {'<sub>pos:' in md_text}")
+                            logger.warning(f"md_text中位置标签数量: {md_text.count('<sub>pos:')}")
+                    else:
+                        items = []
+                        logger.warning("parse_md_with_pos 不可用，无法获取位置信息")
+                
+                except TypeError as e:
+                    if "emit_positions" in str(e):
+                        # 如果不支持emit_positions参数，尝试不带参数调用
+                        logger.warning("to_md_with_pos不支持emit_positions参数，尝试不带参数调用")
+                        doc_input = use_pdf_doc if use_pdf_doc is not None else file_path
+                        md_text = to_md_with_pos(doc_input)
+                        logger.info(f"生成了markdown（不带参数），长度: {len(md_text)}")
+                            
+                        # 解析位置信息
+                        if parse_md_with_pos is not None:
+                            # 添加调试日志
+                            logger.info(f"第二次尝试解析位置信息，md_text长度: {len(md_text)}")
+                            logger.info(f"md_text前500字符: {md_text[:500]}")
+                            
+                            items = parse_md_with_pos(md_text)
+                            logger.info(f"解析出 {len(items)} 个位置信息项")
+                        else:
+                            items = []
+                            logger.warning("parse_md_with_pos 不可用，无法获取位置信息")
+                    else:
+                        raise e
+            else:
+                items = []
+                logger.warning("to_md_with_pos 不可用，无法生成markdown")
+                # 如果to_md_with_pos不可用，我们需要回退到其他方法
+                raise Exception("to_md_with_pos 不可用，无法继续处理")
+            
+            # 使用纯markdown文本进行分块
+            splitter = MarkdownHeaderTextSplitter(headers_to_split_on=CHUNKING_CONFIG['markdown_headers'])
+            chunks = splitter.split_text(md_text)
+            logger.info(f"PyMuPDF4LLM 结构化分块完成，生成 {len(chunks)} 个chunks")
+            
+            # 如果chunks太少，使用更细粒度的分割（仍然基于PyMuPDF4LLM的结果）
+            if len(chunks) < CHUNKING_CONFIG['pymupdf4llm_config']['min_chunks']:
+                logger.info("chunks数量较少，使用更细粒度的分割")
+                # 使用传统分块作为补充，但基于PyMuPDF4LLM的markdown文本
+                text_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=DOCUMENT_CONFIG['chunk_size'],
+                    chunk_overlap=DOCUMENT_CONFIG['chunk_overlap'],
+                    length_function=len,
+                    separators=DOCUMENT_CONFIG['splitter_config']['separators'],
+                    keep_separator=DOCUMENT_CONFIG['splitter_config']['keep_separator'],
+                    is_separator_regex=DOCUMENT_CONFIG['splitter_config']['is_separator_regex']
+                )
+                additional_chunks = text_splitter.split_text(md_text)
+                additional_chunks = [Document(page_content=chunk) for chunk in additional_chunks]
+                chunks.extend(additional_chunks)
+                logger.info(f"补充分割后，总chunks数: {len(chunks)}")
+            
+            # 为每个chunk添加位置信息元数据
+            if items and len(items) > 0:
+                logger.info("开始为chunks添加位置信息元数据")
+                for i, chunk in enumerate(chunks):
+                    # 查找与chunk内容最匹配的位置信息
+                    best_match = None
+                    best_score = 0
+                    
+                    for item in items:
+                        if isinstance(item, dict) and 'text' in item and item['text']:
+                            # 计算文本匹配度
+                            chunk_text = chunk.page_content[:100]  # 取前100个字符进行匹配
+                            item_text = item['text'][:100]
+                            
+                            # 简单的文本相似度计算
+                            common_chars = sum(1 for c in chunk_text if c in item_text)
+                            score = common_chars / max(len(chunk_text), len(item_text), 1)
+                            
+                            if score > best_score and score > 0.3:  # 阈值0.3
+                                best_score = score
+                                best_match = item
+                        
+                    if best_match:
+                        # 设置元数据
+                        chunk.metadata.update({
+                            'page_num': best_match.get('page_num', 1),
+                            'char_start': best_match.get('char_start', 0),
+                            'char_end': best_match.get('char_end', 0),
+                            'bbox_union': best_match.get('bbox_union', None),
+                            'bbox_norm': best_match.get('bbox_norm', None)
+                        })
+                        logger.debug(f"Chunk {i} 添加位置信息: page={chunk.metadata.get('page_num')}, bbox={chunk.metadata.get('bbox_union')}")
+                    else:
+                        logger.warning(f"Chunk {i} 未找到匹配的位置信息")
+                        # 设置默认元数据
+                        chunk.metadata.update({
+                            'page_num': 1,
+                            'char_start': 0,
+                            'char_end': 0,
+                            'bbox_union': None,
+                            'bbox_norm': None
+                        })
+            else:
+                logger.warning("没有位置信息项，为所有chunks设置默认元数据")
+                for i, chunk in enumerate(chunks):
+                    chunk.metadata.update({
+                        'page_num': 1,
+                        'char_start': 0,
+                        'char_end': 0,
+                        'bbox_union': None,
+                        'bbox_norm': None
+                    })
+            # 如果to_md_with_pos不可用，回退到LlamaMarkdownReader
+            if to_md_with_pos is None:
+                logger.warning("to_md_with_pos 不可用，回退到LlamaMarkdownReader")
                 reader = LlamaMarkdownReader()
                 md_nodes = reader.load_data(file_path)
-                # LlamaMarkdownReader 返回的是节点列表，需拼接为字符串
                 if isinstance(md_nodes, list):
                     markdown_text = "\n\n".join(str(n) for n in md_nodes)
                 else:
@@ -345,64 +493,21 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
 
                 splitter = MarkdownHeaderTextSplitter(headers_to_split_on=CHUNKING_CONFIG['markdown_headers'])
                 chunks = splitter.split_text(markdown_text)
-                logger.info(f"PyMuPDF4LLM 结构化分块完成，生成 {len(chunks)} 个chunks")
+                logger.info(f"LlamaMarkdownReader 分块完成，生成 {len(chunks)} 个chunks")
                 
-                # 如果chunks太少，使用更细粒度的分割
-                if len(chunks) < CHUNKING_CONFIG['pymupdf4llm_config']['min_chunks']:
-                    logger.info("chunks数量较少，使用更细粒度的分割")
-                    # 使用传统分块作为补充
-                    text_splitter = RecursiveCharacterTextSplitter(
-                        chunk_size=DOCUMENT_CONFIG['chunk_size'],
-                        chunk_overlap=DOCUMENT_CONFIG['chunk_overlap'],
-                        length_function=len,
-                        separators=DOCUMENT_CONFIG['splitter_config']['separators'],
-                        keep_separator=DOCUMENT_CONFIG['splitter_config']['keep_separator'],
-                        is_separator_regex=DOCUMENT_CONFIG['splitter_config']['is_separator_regex']
-                    )
-                    additional_chunks = text_splitter.split_text(markdown_text)
-                    additional_chunks = [Document(page_content=chunk) for chunk in additional_chunks]
-                    chunks.extend(additional_chunks)
-                    logger.info(f"补充分割后，总chunks数: {len(chunks)}")
-                
-            except Exception as e:
-                logger.warning(f"PyMuPDF4LLM 分块失败，使用传统分块: {e}")
-                chunks = []
-        
-        # 如果 PyMuPDF4LLM 分块失败或不可用，使用传统分块（页粒度，记录粗定位）
-        if not chunks:
-            def split_with_positions(text: str, chunk_size: int, overlap: int):
-                results = []
-                start = 0
-                length = len(text)
-                if chunk_size <= 0:
-                    return results
-                if overlap < 0:
-                    overlap = 0
-                step = max(1, chunk_size - overlap)
-                while start < length:
-                    end = min(start + chunk_size, length)
-                    results.append((text[start:end], start, end))
-                    if end == length:
-                        break
-                    start += step
-                return results
-
-            chunks = []
-            for idx, page_text in enumerate(page_texts):
-                parts = split_with_positions(
-                    page_text,
-                    DOCUMENT_CONFIG['chunk_size'],
-                    DOCUMENT_CONFIG['chunk_overlap']
-                )
-                for _, (ct, cs, ce) in enumerate(parts):
-                    doc_obj = Document(page_content=ct)
-                    # 暂存页内位置，稍后写入ES时带上
-                    doc_obj.metadata.update({
-                        "page_num": idx + 1,
-                        "char_start": cs,
-                        "char_end": ce
+                # 为回退的chunks设置默认元数据
+                for i, chunk in enumerate(chunks):
+                    chunk.metadata.update({
+                        'page_num': 1,
+                        'char_start': 0,
+                        'char_end': 0,
+                        'bbox_union': None,
+                        'bbox_norm': None
                     })
-                    chunks.append(doc_obj)
+        
+        except Exception as e:
+            logger.error(f"PyMuPDF4LLM 分块失败: {e}")
+            raise Exception(f"PyMuPDF4LLM 分块失败，无法继续处理: {e}")
         
         # 为每个chunk添加元数据
         for chunk in chunks:
@@ -412,24 +517,25 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
                 "description": description,
                 "tags": tags.split(",") if tags else [],
                 "effective_time": effective_time,
-                "source_file": os.path.basename(file_path),
+                "source_file": original_filename or os.path.basename(file_path),
                 "file_type": Path(file_path).suffix.lower(),
-                "processing_method": "pymupdf_pro"
+                "processing_method": "pymupdf4llm_only"  # 标记只使用PyMuPDF4LLM
             })
 
-        # 集成：基于 PyMuPDF4LLM 生成“页级定位”与预览（不影响分块与入库）
+        # 集成：基于 PyMuPDF4LLM 生成"页级定位"与预览
         try:
             base_name = os.path.splitext(os.path.basename(file_path))[0]
             out_dir = os.path.join(os.path.dirname(file_path), f"out_pdfllm_{base_name}")
             os.makedirs(out_dir, exist_ok=True)
             if to_md_with_pos is not None and parse_md_with_pos is not None and save_aligned is not None:
                 # 直接传递 Document，可兼容通过 Pro 打开的非PDF源
-                md_text = to_md_with_pos(use_pdf_doc if use_pdf_doc is not None else file_path, emit_positions=True)
+                md_text = to_md_with_pos(use_pdf_doc if use_pdf_doc is not None else file_path)
                 md_pos_path = os.path.join(out_dir, "pdfllm_document_with_pos.md")
                 with open(md_pos_path, "w", encoding="utf-8") as f:
                     f.write(md_text)
                 aligned_path = os.path.join(out_dir, "aligned_positions.json")
-                items = parse_md_with_pos(md_pos_path)
+                # 直接传递Markdown文本内容，而不是文件路径
+                items = parse_md_with_pos(md_text)
                 save_aligned(items, aligned_path)
                 # 预览（可选）
                 if draw_preview is not None:
@@ -437,6 +543,52 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
                     os.makedirs(preview_dir, exist_ok=True)
                     draw_preview(file_path, aligned_path, preview_dir)
                 logger.info(f"PDFLLM 定位与预览已生成: {out_dir}")
+                
+                # 直接使用parse_md_with_pos的结果来更新chunks的metadata
+                try:
+                    # items包含了所有带位置信息的文本块
+                    logger.info(f"解析到 {len(items)} 个带位置信息的文本块")
+                    
+                    # 为每个chunk找到对应的位置信息
+                    for i, chunk in enumerate(chunks):
+                        chunk_text = chunk.page_content[:100]  # 取前100字符作为标识
+                        best_match = None
+                        best_score = 0
+                        
+                        # 在items中查找最匹配的文本块
+                        for item in items:
+                            if isinstance(item, dict) and 'text' in item:
+                                item_text = item['text']
+                                # 计算文本相似度（简单的重叠字符数）
+                                overlap = 0
+                                for char in chunk_text:
+                                    if char in item_text:
+                                        overlap += 1
+                                score = overlap / len(chunk_text) if chunk_text else 0
+                                
+                                if score > best_score and score > 0.3:  # 至少30%重叠
+                                    best_score = score
+                                    best_match = item
+                        
+                        if best_match:
+                            # 从best_match中提取位置信息
+                            page_num = best_match.get('page_num', -1)
+                            bbox = best_match.get('bbox_union', [])
+                            
+                            # 更新chunk的metadata
+                            chunk.metadata.update({
+                                "page_num": page_num,
+                                "bbox_union": bbox,
+                                "char_start": 0,  # 暂时设为0
+                                "char_end": len(chunk.page_content)
+                            })
+                            logger.info(f"Chunk {i} 位置信息更新: page={page_num}, bbox={bbox}, score={best_score:.2f}")
+                        else:
+                            logger.warning(f"Chunk {i} 未找到匹配的位置信息")
+                            
+                except Exception as e:
+                    logger.warning(f"从parse_md_with_pos结果提取位置信息失败: {e}")
+                    
             else:
                 logger.warning("PDFLLM 定位/预览依赖不可用，跳过该步骤")
         except Exception as e:
@@ -454,12 +606,21 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
                 
                 # 准备ES文档
                 doc_id = hashlib.md5(f"{knowledge_id}_{i}_{chunk.page_content[:100]}".encode()).hexdigest()
-                # 计算页内bbox（仅当有词级索引时）
+                
+                # 从chunk metadata中获取位置信息
                 page_num = int(chunk.metadata.get("page_num") or -1)
-                bbox_union = []
-                if page_num > 0 and page_num - 1 < len(page_word_entries):
+                bbox_union = chunk.metadata.get("bbox_union", [])
+                char_start = int(chunk.metadata.get("char_start") or -1)
+                char_end = int(chunk.metadata.get("char_end") or -1)
+                
+                # 添加调试日志
+                logger.info(f"Chunk {i} metadata: page_num={page_num}, bbox_union={bbox_union}, char_start={char_start}, char_end={char_end}")
+                
+                # 如果没有从chunk metadata获取到bbox，则尝试计算页内bbox（仅当有词级索引时）
+                if not bbox_union and page_num > 0 and page_num - 1 < len(page_word_entries):
                     entries = page_word_entries[page_num - 1]
-                    bbox_union = compute_bbox_union_for_range(entries, int(chunk.metadata.get("char_start") or 0), int(chunk.metadata.get("char_end") or 0))
+                    bbox_union = compute_bbox_union_for_range(entries, char_start, char_end)
+                    logger.info(f"Chunk {i} 计算得到bbox: {bbox_union}")
 
                 # 计算页面尺寸与归一化坐标
                 page_w = page_h = None
@@ -481,19 +642,19 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
                     "description": description,
                     "tags": tags.split(",") if tags else [],
                     "effective_time": effective_time,
-                    "source_file": os.path.basename(file_path),
+                    "source_file": original_filename or os.path.basename(file_path),
                     "file_type": Path(file_path).suffix.lower(),
-                    "processing_method": "pymupdf_pro",
+                    "processing_method": "pymupdf4llm_only",  # 更新处理方法标记
                     "chunk_index": i,
                     "chunk_type": "content",
                     "weight": 1.0,
                     "page_num": page_num,
-                    "char_start": int(chunk.metadata.get("char_start") or -1),
-                    "char_end": int(chunk.metadata.get("char_end") or -1),
-                        "bbox_union": bbox_union,
-                        "page_width": page_w,
-                        "page_height": page_h,
-                        "bbox_norm": bbox_norm
+                    "char_start": char_start,
+                    "char_end": char_end,
+                    "bbox_union": bbox_union,
+                    "page_width": page_w,
+                    "page_height": page_h,
+                    "bbox_norm": bbox_norm
                 }
                 
                 # 存储到ES
@@ -526,7 +687,7 @@ def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: 
                         "description": description,
                         "tags": tags.split(",") if tags else [],
                         "effective_time": effective_time,
-                        "source_file": os.path.basename(file_path),
+                        "source_file": original_filename or os.path.basename(file_path),
                         "file_type": Path(file_path).suffix.lower(),
                         "processing_method": "pymupdf_pro",
                         "chunk_index": -1,
@@ -591,7 +752,7 @@ async def process_document(
             # 处理文档
             result = process_document_unified(
                 temp_file_path, knowledge_id, knowledge_name, 
-                description, tags, effective_time
+                description, tags, effective_time, file.filename
             )
             
             return DocumentProcessResponse(
@@ -699,7 +860,10 @@ def chat_with_rag(request: ChatRequest):
                 source_file=doc.metadata.get("source_file"),
                 page_num=doc.metadata.get("page_num"),
                 chunk_index=doc.metadata.get("chunk_index"),
-                chunk_type=doc.metadata.get("chunk_type")
+                chunk_type=doc.metadata.get("chunk_type"),
+                bbox_union=doc.metadata.get("bbox_union"),
+                char_start=doc.metadata.get("char_start"),
+                char_end=doc.metadata.get("char_end")
             )
             references.append(reference)
             
@@ -805,7 +969,7 @@ def health_check():
             "pymupdf": pymupdf_status,
             "pymupdf_pro": pymupdf_pro_status,
             "geekai_api": geekai_status,
-            "pymupdf4llm": "available" if PYMUPDF4LLM_AVAILABLE else "unavailable",
+            "mypymupdf4llm": "available" if PYMUPDF4LLM_AVAILABLE else "unavailable",
             "timestamp": "2024-01-01T00:00:00Z"
         }
     except Exception as e:

@@ -1,0 +1,24 @@
+{
+  "category_management": {
+    "create_category": true,
+    "get_categories": true,
+    "update_category": true,
+    "delete_category": true,
+    "category_id": 49
+  },
+  "knowledge_management": {
+    "create_knowledge": true,
+    "get_knowledge": true,
+    "update_knowledge": true,
+    "delete_knowledge": true,
+    "knowledge_id": 29
+  },
+  "search_functionality": {
+    "basic_search": true,
+    "recommendations": true,
+    "search_suggestions": true
+  },
+  "elasticsearch_integration": {
+    "es_search": true
+  }
+}

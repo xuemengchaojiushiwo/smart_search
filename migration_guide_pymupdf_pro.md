@@ -31,7 +31,7 @@ pip install pymupdfpro>=1.26.0
 #### 1.3 更新依赖
 ```bash
 # 安装新的依赖
-pip install pymupdf4llm>=0.0.21 llama-index>=0.9.0
+pip install mypymupdf4llm>=0.0.21 llama-index>=0.9.0
 
 # 可选：移除旧的依赖
 # pip uninstall python-docx openpyxl python-pptx
@@ -131,9 +131,10 @@ allowed_extensions = {
 ```
 
 ### 分块策略优化
+
 ```python
 # 使用 PyMuPDF4LLM 进行结构化分块
-from pymupdf4llm import LlamaMarkdownReader
+from mypymupdf4llm import LlamaMarkdownReader
 from langchain.text_splitter import MarkdownHeaderTextSplitter
 
 reader = LlamaMarkdownReader()

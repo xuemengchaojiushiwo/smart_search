@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 一键验证：
-1) 用本地 pymupdf4llm 生成带 <sub>pos: ...</sub> 的 Markdown
+1) 用本地 mypymupdf4llm 生成带 <sub>pos: ...</sub> 的 Markdown
 2) 转换为 aligned_positions.json（页和 bbox）
 3) 生成每页带框 PNG 预览，并输出报告
 
@@ -26,7 +26,7 @@ def main():
     os.makedirs(args.out, exist_ok=True)
 
     # 1) 生成带位置的 MD
-    from pymupdf4llm.helpers.pymupdf_rag import to_markdown as to_md
+    from mypymupdf4llm.helpers.pymupdf_rag import to_markdown as to_md
     md_text = to_md(args.pdf, emit_positions=True)
     md_pos_path = os.path.join(args.out, 'pdfllm_document_with_pos.md')
     with open(md_pos_path, 'w', encoding='utf-8') as f:

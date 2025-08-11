@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-一键创建/重建 ES 索引（knowledge_chunks），用于存储“知识+附件”分块
+一键创建/重建 ES 索引（knowledge_chunks），用于存储"知识+附件"分块
 - 支持 dense_vector(1536)
 - 支持页码、位置（char_start/char_end）、元信息块（knowledge_meta）
 """
@@ -23,7 +23,7 @@ mapping = {
             "knowledge_name": {"type": "keyword"},
             "description": {"type": "text"},
             "tags": {"type": "keyword"},
-            "effective_time": {"type": "date", "format": "yyyy-MM-dd||strict_date_optional_time||epoch_millis"},
+            "effective_time": {"type": "keyword"},  # 改为keyword类型，避免日期解析错误
             "attachment_name": {"type": "keyword"},
             "source_file": {"type": "keyword"},
             "file_type": {"type": "keyword"},

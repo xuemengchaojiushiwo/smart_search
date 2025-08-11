@@ -221,17 +221,13 @@ public class ElasticsearchService {
 
             searchSourceBuilder.query(multiMatchQuery);
 
-            // 分页
-            searchSourceBuilder.from((page - 1) * size);
-            searchSourceBuilder.size(size);
+            // 分页（加下界保护，防止 from 为负或 size 非法）
+            int safePage = page > 0 ? page : 1;
+            int safeSize = size > 0 ? size : 10;
+            searchSourceBuilder.from((safePage - 1) * safeSize);
+            searchSourceBuilder.size(safeSize);
 
-            // 高亮设置
-            HighlightBuilder highlightBuilder = new HighlightBuilder();
-            highlightBuilder.field("title").preTags("<em>").postTags("</em>");
-            highlightBuilder.field("content").preTags("<em>").postTags("</em>");
-            highlightBuilder.field("tags").preTags("<em>").postTags("</em>");
-            highlightBuilder.field("attachment_names").preTags("<em>").postTags("</em>");
-            searchSourceBuilder.highlighter(highlightBuilder);
+            // 暂时移除高亮，避免因字段类型或映射差异导致查询报错
 
             searchRequest.source(searchSourceBuilder);
 
@@ -243,10 +239,18 @@ public class ElasticsearchService {
             for (SearchHit hit : response.getHits().getHits()) {
                 Map<String, Object> source = hit.getSourceAsMap();
                 ElasticsearchResultVO result = new ElasticsearchResultVO();
-
-                result.setId(Long.valueOf(source.get("id").toString()));
-                result.setTitle((String) source.get("title"));
-                result.setContent((String) source.get("content"));
+                // 设置ID：仅在可解析为Long时设置，避免非数字ID引发异常
+                Object idObj = source.get("id");
+                String idStr = idObj != null ? idObj.toString() : hit.getId();
+                try {
+                    if (idStr != null) {
+                        result.setId(Long.valueOf(idStr));
+                    }
+                } catch (NumberFormatException nfe) {
+                    log.warn("ES文档ID非数字，跳过ID设置: {}", idStr);
+                }
+                result.setTitle((String) source.getOrDefault("title", ""));
+                result.setContent((String) source.getOrDefault("content", ""));
                 // 修复category_id类型转换问题
                 Object categoryIdObj = source.get("category_id");
                 if (categoryIdObj != null) {
@@ -296,7 +300,7 @@ public class ElasticsearchService {
 
         } catch (IOException e) {
             log.error("搜索知识失败", e);
-            return new ArrayList<>();
+            throw new RuntimeException("ES搜索失败: " + e.getMessage(), e);
         }
     }
 
@@ -329,7 +333,7 @@ public class ElasticsearchService {
 
         } catch (IOException e) {
             log.error("获取搜索总数失败", e);
-            return 0;
+            throw new RuntimeException("ES获取总数失败: " + e.getMessage(), e);
         }
     }
     
@@ -381,7 +385,7 @@ public class ElasticsearchService {
             
         } catch (IOException e) {
             log.error("获取搜索建议失败: query={}", query, e);
-            return new ArrayList<>();
+            throw new RuntimeException("ES获取搜索建议失败: " + e.getMessage(), e);
         }
     }
 }

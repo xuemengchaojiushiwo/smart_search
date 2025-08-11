@@ -102,31 +102,34 @@ def process_document(file_path):
 ## 实施建议
 
 ### 方案1: 完全采用 PyMuPDF Pro (推荐)
+
 ```python
 # python_service/app.py 更新
 import pymupdf.pro
+
 pymupdf.pro.unlock()
+
 
 def process_document_unified(file_path):
     """统一的文档处理函数"""
     try:
         doc = pymupdf.open(file_path)
         text_parts = []
-        
+
         for page in doc:
             text = page.get_text()
             if text.strip():
                 text_parts.append(text)
-        
+
         full_text = "\n".join(text_parts)
-        
+
         # 使用 PyMuPDF4LLM 进行结构化分块
-        from pymupdf4llm import LlamaMarkdownReader
+        from mypymupdf4llm import LlamaMarkdownReader
         from langchain.text_splitter import MarkdownHeaderTextSplitter
-        
+
         reader = LlamaMarkdownReader()
         markdown_text = reader.load_data(file_path)
-        
+
         splitter = MarkdownHeaderTextSplitter(
             headers_to_split_on=[
                 ("#", "标题1"),
@@ -135,9 +138,9 @@ def process_document_unified(file_path):
             ]
         )
         chunks = splitter.split_text(markdown_text)
-        
+
         return chunks
-        
+
     except Exception as e:
         logger.error(f"文档处理失败: {e}")
         raise

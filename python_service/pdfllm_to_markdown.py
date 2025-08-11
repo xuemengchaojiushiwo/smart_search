@@ -19,7 +19,7 @@ def ensure_dir(p: str):
 
 def try_import_reader():
     try:
-        from pymupdf4llm import LlamaMarkdownReader  # type: ignore
+        from mypymupdf4llm import LlamaMarkdownReader  # type: ignore
         return LlamaMarkdownReader
     except Exception as e:
         raise SystemExit(f"❌ 未找到 PyMuPDF4LLM，请先安装并确保可导入：{e}")

@@ -12,17 +12,17 @@ ES_CONFIG = {
 
 # 文档处理配置
 DOCUMENT_CONFIG = {
-    "chunk_size": 1000,
-    "chunk_overlap": 300,  # 从200增加到300，提高重叠比例
+    "chunk_size": 4000,  # 从1000增加到4000，减少过度分块
+    "chunk_overlap": 800,  # 从300增加到800，提高重叠比例
     "allowed_extensions": {".pdf", ".docx", ".xlsx", ".txt", ".pptx"},
     # 动态重叠策略
     "dynamic_overlap": {
-        "pdf": 0.35,      # PDF文档35%重叠
-        "docx": 0.25,     # Word文档25%重叠
-        "pptx": 0.25,     # PowerPoint文档25%重叠
-        "xlsx": 0.30,     # Excel文档30%重叠
-        "txt": 0.20,      # 文本文档20%重叠
-        "default": 0.30   # 默认30%重叠
+        "pdf": 0.25,      # PDF文档25%重叠（从35%减少）
+        "docx": 0.20,     # Word文档20%重叠
+        "pptx": 0.20,     # PowerPoint文档20%重叠
+        "xlsx": 0.25,     # Excel文档25%重叠
+        "txt": 0.15,      # 文本文档15%重叠
+        "default": 0.20   # 默认20%重叠
     },
     # 分块器配置
     "splitter_config": {
@@ -73,7 +73,7 @@ PYMUPDF_PRO_CONFIG = {
     "processing_methods": {
         "primary": "pymupdf_pro",
         "fallback": "traditional",
-        "chunking": "pymupdf4llm"
+        "chunking": "mypymupdf4llm"
     }
 }
 
@@ -90,14 +90,14 @@ CHUNKING_CONFIG = {
         ("######", "标题6"),
     ],
     "traditional_splitter": {
-        "chunk_size": 1000,
-        "chunk_overlap": 300,  # 从200增加到300
+        "chunk_size": 4000,  # 从1000增加到4000
+        "chunk_overlap": 800,  # 从300增加到800
         "separators": ["\n\n", "\n", "。", "！", "？", ".", "!", "?"]
     },
     # PyMuPDF4LLM 优化配置
     "pymupdf4llm_config": {
-        "min_chunks": 3,  # 最少chunks数量
-        "max_chunk_size": 1500,  # 最大chunk大小
+        "min_chunks": 2,  # 最少chunks数量（从3减少到2）
+        "max_chunk_size": 6000,  # 最大chunk大小（从1500增加到6000）
         "min_chunk_size": 200,   # 最小chunk大小
         "use_semantic_overlap": True,  # 使用语义重叠
         "preserve_structure": True,     # 保持文档结构
@@ -117,7 +117,7 @@ DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
 # 服务配置
 HOST = "0.0.0.0"
-PORT = 5000
+PORT = 8000
 DEBUG = True
 
 # 日志配置

@@ -40,9 +40,9 @@ import string
 from binascii import b2a_base64
 import pymupdf
 from pymupdf import mupdf
-from pymupdf4llm.helpers.get_text_lines import get_raw_lines, is_white
-from pymupdf4llm.helpers.multi_column import column_boxes
-from pymupdf4llm.helpers.progress import ProgressBar
+from mypymupdf4llm.helpers.get_text_lines import get_raw_lines, is_white
+from mypymupdf4llm.helpers.multi_column import column_boxes
+from mypymupdf4llm.helpers.progress import ProgressBar
 from dataclasses import dataclass
 from collections import defaultdict
 

@@ -1,188 +1,518 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-完整系统测试
-验证所有功能是否正常工作
+完整系统功能测试脚本
+测试Java服务的类目管理、知识管理、搜索功能
 """
 
 import requests
 import json
 import time
+from typing import Dict, Any, List
+import os
 
-def test_login_api():
-    """测试登录API"""
-    print("🔐 测试登录API...")
-    
-    login_data = {"username": "admin", "password": "admin123"}
-    
-    try:
-        response = requests.post(
-            "http://localhost:8080/api/auth/login",
-            json=login_data
-        )
+class CompleteSystemTester:
+    def __init__(self):
+        self.base_url = "http://localhost:8080"
+        self.headers = {
+            "Content-Type": "application/json"
+        }
+        self.test_results = {}
         
-        if response.status_code == 200:
-            data = response.json()
-            token = data.get('data', {}).get('token', '')
-            print(f"✅ 登录成功，获取到token")
-            return token
-        else:
-            print(f"❌ 登录失败: {response.status_code}")
-            return None
-            
-    except Exception as e:
-        print(f"❌ 登录异常: {e}")
-        return None
-
-def test_es_search():
-    """测试ES搜索"""
-    print("\n🔍 测试ES搜索...")
-    
-    try:
-        response = requests.get("http://localhost:8080/api/es/search?query=Spring Boot&page=1&size=10")
-        if response.status_code == 200:
-            data = response.json()
-            print(f"✅ ES搜索成功: {len(data.get('data', []))} 条结果")
-            return True
-        else:
-            print(f"❌ ES搜索失败: {response.status_code}")
+    def test_health_check(self) -> bool:
+        """测试服务健康状态"""
+        try:
+            # 尝试访问Swagger端点来验证服务可用性
+            response = requests.get(f"{self.base_url}/swagger-ui.html", timeout=5)
+            if response.status_code == 200:
+                print("✅ Java服务健康检查通过 (通过Swagger端点)")
+                return True
+            else:
+                print(f"❌ Java服务健康检查失败: {response.status_code}")
+                return False
+        except Exception as e:
+            print(f"❌ Java服务连接失败: {e}")
             return False
-    except Exception as e:
-        print(f"❌ ES搜索异常: {e}")
-        return False
-
-def test_swagger_ui():
-    """测试Swagger UI"""
-    print("\n📖 测试Swagger UI...")
     
-    try:
-        response = requests.get("http://localhost:8080/swagger-ui/index.html")
-        if response.status_code == 200:
-            print("✅ Swagger UI访问成功")
-            return True
-        else:
-            print(f"❌ Swagger UI访问失败: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"❌ Swagger UI异常: {e}")
-        return False
-
-def test_elasticsearch_status():
-    """测试ES状态"""
-    print("\n🔍 测试ES状态...")
-    
-    try:
-        response = requests.get("http://localhost:9200")
-        if response.status_code == 200:
-            data = response.json()
-            print(f"✅ ES运行正常: {data.get('version', {}).get('number', 'N/A')}")
-            return True
-        else:
-            print(f"❌ ES连接失败: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"❌ ES状态检查异常: {e}")
-        return False
-
-def test_knowledge_apis_with_token(token):
-    """使用token测试知识管理API"""
-    print("\n📚 测试知识管理API（使用token）...")
-    
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    try:
-        # 测试获取知识列表
-        response = requests.get(
-            "http://localhost:8080/api/knowledge/list?page=1&size=10",
-            headers=headers
-        )
+    def test_category_management(self) -> Dict[str, Any]:
+        """测试类目管理功能"""
+        print("\n" + "="*50)
+        print("测试类目管理功能")
+        print("="*50)
         
-        if response.status_code == 200:
-            data = response.json()
-            print(f"✅ 知识列表获取成功: {len(data.get('data', {}).get('records', []))} 条记录")
-        else:
-            print(f"❌ 知识列表获取失败: {response.status_code}")
-            print(f"   响应: {response.text}")
-            
-    except Exception as e:
-        print(f"❌ 知识管理API异常: {e}")
-
-def test_category_apis_with_token(token):
-    """使用token测试分类管理API"""
-    print("\n📂 测试分类管理API（使用token）...")
-    
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    try:
-        # 测试获取分类列表
-        response = requests.get(
-            "http://localhost:8080/api/category/list",
-            headers=headers
-        )
+        results = {
+            'create_category': False,
+            'get_categories': False,
+            'update_category': False,
+            'delete_category': False,
+            'category_id': None
+        }
         
-        if response.status_code == 200:
-            data = response.json()
-            print(f"✅ 分类列表获取成功: {len(data.get('data', []))} 条记录")
-        else:
-            print(f"❌ 分类列表获取失败: {response.status_code}")
-            print(f"   响应: {response.text}")
+        try:
+            # 1. 创建类目
+            print("1. 测试创建类目...")
+            category_data = {
+                "name": "测试类目",
+                "level": 1,
+                "description": "这是一个测试类目",
+                "parentId": None,
+                "sortOrder": 1
+            }
             
-    except Exception as e:
-        print(f"❌ 分类管理API异常: {e}")
+            response = requests.post(
+                f"{self.base_url}/api/categories",
+                headers=self.headers,
+                json=category_data,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('code') == 200:
+                    category_id = result['data']['id']
+                    results['category_id'] = category_id
+                    results['create_category'] = True
+                    print(f"✅ 创建类目成功，ID: {category_id}")
+                else:
+                    print(f"❌ 创建类目失败: {result.get('message')}")
+            else:
+                print(f"❌ 创建类目请求失败: {response.status_code}")
+            
+            # 2. 获取类目列表
+            print("2. 测试获取类目列表...")
+            response = requests.get(
+                f"{self.base_url}/api/categories",
+                headers=self.headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('code') == 200:
+                    categories = result['data']
+                    print(f"✅ 获取类目列表成功，共{len(categories)}个类目")
+                    results['get_categories'] = True
+                else:
+                    print(f"❌ 获取类目列表失败: {result.get('message')}")
+            else:
+                print(f"❌ 获取类目列表请求失败: {response.status_code}")
+            
+            # 3. 更新类目
+            if results['category_id']:
+                print("3. 测试更新类目...")
+                update_data = {
+                    "name": "更新后的测试类目",
+                    "level": 1,
+                    "description": "这是更新后的测试类目描述",
+                    "parentId": None,
+                    "sortOrder": 2
+                }
+                
+                response = requests.put(
+                    f"{self.base_url}/api/categories/{results['category_id']}",
+                    headers=self.headers,
+                    json=update_data,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('code') == 200:
+                        print("✅ 更新类目成功")
+                        results['update_category'] = True
+                    else:
+                        print(f"❌ 更新类目失败: {result.get('message')}")
+                else:
+                    print(f"❌ 更新类目请求失败: {response.status_code}")
+            
+            # 4. 删除类目
+            if results['category_id']:
+                print("4. 测试删除类目...")
+                response = requests.delete(
+                    f"{self.base_url}/api/categories/{results['category_id']}",
+                    headers=self.headers,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('code') == 200:
+                        print("✅ 删除类目成功")
+                        results['delete_category'] = True
+                    else:
+                        print(f"❌ 删除类目失败: {result.get('message')}")
+                else:
+                    print(f"❌ 删除类目请求失败: {response.status_code}")
+                    
+        except Exception as e:
+            print(f"❌ 类目管理测试异常: {e}")
+        
+        return results
+    
+    def test_knowledge_management(self) -> Dict[str, Any]:
+        """测试知识管理功能"""
+        print("\n" + "="*50)
+        print("测试知识管理功能")
+        print("="*50)
+        
+        results = {
+            'create_knowledge': False,
+            'get_knowledge': False,
+            'update_knowledge': False,
+            'delete_knowledge': False,
+            'knowledge_id': None
+        }
+        
+        try:
+            # 1. 创建知识
+            print("1. 测试创建知识...")
+            knowledge_data = {
+                "name": "测试知识标题",
+                "description": "这是测试知识的内容，包含一些重要的信息用于测试。",
+                "categoryId": 1,
+                "tags": ["测试", "示例"]
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/api/knowledge",
+                headers=self.headers,
+                json=knowledge_data,
+                timeout=10
+            )
+            
+                            if response.status_code == 200:
+                    result = response.json()
+                    if result.get('code') == 200:
+                        knowledge_id = result['data']['id']
+                        results['knowledge_id'] = knowledge_id
+                        results['create_knowledge'] = True
+                        print(f"✅ 创建知识成功，ID: {knowledge_id}")
+                    else:
+                        print(f"❌ 创建知识失败: {result.get('message')}")
+            else:
+                print(f"❌ 创建知识请求失败: {response.status_code}")
+            
+            # 2. 获取知识详情
+            if results['knowledge_id']:
+                print("2. 测试获取知识详情...")
+                response = requests.get(
+                    f"{self.base_url}/api/knowledge/{results['knowledge_id']}",
+                    headers=self.headers,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        print("✅ 获取知识详情成功")
+                        results['get_knowledge'] = True
+                    else:
+                        print(f"❌ 获取知识详情失败: {result.get('message')}")
+                else:
+                    print(f"❌ 获取知识详情请求失败: {response.status_code}")
+            
+            # 3. 更新知识
+            if results['knowledge_id']:
+                print("3. 测试更新知识...")
+                update_data = {
+                    "name": "更新后的测试知识标题",
+                    "description": "这是更新后的测试知识内容，包含更多信息。",
+                    "categoryId": 1,
+                    "tags": ["测试", "示例", "更新"]
+                }
+                
+                response = requests.put(
+                    f"{self.base_url}/api/knowledge/{results['knowledge_id']}",
+                    headers=self.headers,
+                    json=update_data,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        print("✅ 更新知识成功")
+                        results['update_knowledge'] = True
+                    else:
+                        print(f"❌ 更新知识失败: {result.get('message')}")
+                else:
+                    print(f"❌ 更新知识请求失败: {response.status_code}")
+            
+            # 4. 删除知识
+            if results['knowledge_id']:
+                print("4. 测试删除知识...")
+                response = requests.delete(
+                    f"{self.base_url}/api/knowledge/{results['knowledge_id']}",
+                    headers=self.headers,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        print("✅ 删除知识成功")
+                        results['delete_knowledge'] = True
+                    else:
+                        print(f"❌ 删除知识失败: {result.get('message')}")
+                else:
+                    print(f"❌ 删除知识请求失败: {response.status_code}")
+                    
+        except Exception as e:
+            print(f"❌ 知识管理测试异常: {e}")
+        
+        return results
+    
+    def test_search_functionality(self) -> Dict[str, Any]:
+        """测试搜索功能"""
+        print("\n" + "="*50)
+        print("测试搜索功能")
+        print("="*50)
+        
+        results = {
+            'basic_search': False,
+            'advanced_search': False,
+            'search_suggestions': False
+        }
+        
+        try:
+            # 1. 基础搜索
+            print("1. 测试基础搜索...")
+            search_params = {
+                "query": "测试",
+                "page": 1,
+                "size": 10
+            }
+            
+            response = requests.get(
+                f"{self.base_url}/api/search",
+                headers=self.headers,
+                params=search_params,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    search_results = result['data']
+                    print(f"✅ 基础搜索成功，找到{len(search_results.get('content', []))}条结果")
+                    results['basic_search'] = True
+                else:
+                    print(f"❌ 基础搜索失败: {result.get('message')}")
+            else:
+                print(f"❌ 基础搜索请求失败: {response.status_code}")
+            
+            # 2. 高级搜索
+            print("2. 测试高级搜索...")
+            advanced_search_data = {
+                "query": "测试",
+                "categoryId": None,
+                "tags": ["测试"],
+                "startDate": None,
+                "endDate": None,
+                "page": 1,
+                "size": 10
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/api/search/advanced",
+                headers=self.headers,
+                json=advanced_search_data,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    search_results = result['data']
+                    print(f"✅ 高级搜索成功，找到{len(search_results.get('content', []))}条结果")
+                    results['advanced_search'] = True
+                else:
+                    print(f"❌ 高级搜索失败: {result.get('message')}")
+            else:
+                print(f"❌ 高级搜索请求失败: {response.status_code}")
+            
+            # 3. 搜索建议
+            print("3. 测试搜索建议...")
+            response = requests.get(
+                f"{self.base_url}/api/search/suggestions",
+                headers=self.headers,
+                params={"query": "测试"},
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    suggestions = result['data']
+                    print(f"✅ 搜索建议成功，获得{len(suggestions)}条建议")
+                    results['search_suggestions'] = True
+                else:
+                    print(f"❌ 搜索建议失败: {result.get('message')}")
+            else:
+                print(f"❌ 搜索建议请求失败: {response.status_code}")
+                
+        except Exception as e:
+            print(f"❌ 搜索功能测试异常: {e}")
+        
+        return results
+    
+    def test_elasticsearch_integration(self) -> Dict[str, Any]:
+        """测试Elasticsearch集成"""
+        print("\n" + "="*50)
+        print("测试Elasticsearch集成")
+        print("="*50)
+        
+        results = {
+            'es_health': False,
+            'es_search': False,
+            'es_index_info': False
+        }
+        
+        try:
+            # 1. 检查ES健康状态
+            print("1. 检查Elasticsearch健康状态...")
+            response = requests.get(
+                f"{self.base_url}/api/elasticsearch/health",
+                headers=self.headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    es_status = result['data']
+                    print(f"✅ ES健康检查成功: {es_status}")
+                    results['es_health'] = True
+                else:
+                    print(f"❌ ES健康检查失败: {result.get('message')}")
+            else:
+                print(f"❌ ES健康检查请求失败: {response.status_code}")
+            
+            # 2. ES搜索测试
+            print("2. 测试Elasticsearch搜索...")
+            es_search_data = {
+                "query": "测试",
+                "index": "knowledge",
+                "size": 5
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/api/elasticsearch/search",
+                headers=self.headers,
+                json=es_search_data,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    es_results = result['data']
+                    print(f"✅ ES搜索成功，找到{len(es_results.get('hits', []))}条结果")
+                    results['es_search'] = True
+                else:
+                    print(f"❌ ES搜索失败: {result.get('message')}")
+            else:
+                print(f"❌ ES搜索请求失败: {response.status_code}")
+            
+            # 3. 获取索引信息
+            print("3. 获取索引信息...")
+            response = requests.get(
+                f"{self.base_url}/api/elasticsearch/indices",
+                headers=self.headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    indices_info = result['data']
+                    print(f"✅ 获取索引信息成功: {indices_info}")
+                    results['es_index_info'] = True
+                else:
+                    print(f"❌ 获取索引信息失败: {result.get('message')}")
+            else:
+                print(f"❌ 获取索引信息请求失败: {response.status_code}")
+                
+        except Exception as e:
+            print(f"❌ Elasticsearch集成测试异常: {e}")
+        
+        return results
+    
+    def run_all_tests(self):
+        """运行所有测试"""
+        print("🚀 开始完整系统功能测试")
+        print("="*60)
+        
+        # 检查服务健康状态
+        if not self.test_health_check():
+            print("❌ 服务不可用，停止测试")
+            return
+        
+        # 测试各个功能模块
+        self.test_results['category_management'] = self.test_category_management()
+        self.test_results['knowledge_management'] = self.test_knowledge_management()
+        self.test_results['search_functionality'] = self.test_search_functionality()
+        self.test_results['elasticsearch_integration'] = self.test_elasticsearch_integration()
+        
+        # 生成测试报告
+        self.generate_test_report()
+    
+    def generate_test_report(self):
+        """生成测试报告"""
+        print("\n" + "="*60)
+        print("完整系统功能测试报告")
+        print("="*60)
+        
+        # 计算总体成功率
+        total_tests = 0
+        passed_tests = 0
+        
+        for module_name, module_results in self.test_results.items():
+            print(f"\n📋 {module_name.replace('_', ' ').title()}:")
+            module_tests = 0
+            module_passed = 0
+            
+            for test_name, test_result in module_results.items():
+                if test_name != 'category_id' and test_name != 'knowledge_id':
+                    module_tests += 1
+                    total_tests += 1
+                    if test_result:
+                        module_passed += 1
+                        passed_tests += 1
+                        status = "✅ 通过"
+                    else:
+                        status = "❌ 失败"
+                    print(f"  {test_name}: {status}")
+            
+            success_rate = (module_passed / module_tests * 100) if module_tests > 0 else 0
+            print(f"  模块成功率: {success_rate:.1f}% ({module_passed}/{module_tests})")
+        
+        # 总体统计
+        overall_success_rate = (passed_tests / total_tests * 100) if total_tests > 0 else 0
+        print(f"\n📊 总体测试结果:")
+        print(f"  总测试数: {total_tests}")
+        print(f"  通过数: {passed_tests}")
+        print(f"  失败数: {total_tests - passed_tests}")
+        print(f"  总体成功率: {overall_success_rate:.1f}%")
+        
+        # 保存详细报告
+        report_file = "complete_system_test_report.json"
+        with open(report_file, 'w', encoding='utf-8') as f:
+            json.dump(self.test_results, f, ensure_ascii=False, indent=2)
+        print(f"\n📄 详细测试报告已保存到: {report_file}")
+        
+        # 测试结论
+        if overall_success_rate >= 80:
+            print(f"\n🎉 测试结论: 系统功能正常，总体成功率{overall_success_rate:.1f}%")
+        elif overall_success_rate >= 60:
+            print(f"\n⚠️ 测试结论: 系统基本可用，但存在一些问题，总体成功率{overall_success_rate:.1f}%")
+        else:
+            print(f"\n❌ 测试结论: 系统存在严重问题，需要修复，总体成功率{overall_success_rate:.1f}%")
 
 def main():
-    """主测试函数"""
-    print("🚀 完整系统测试")
-    print("=" * 50)
-    
-    # 等待服务启动
-    print("⏳ 等待服务启动...")
-    time.sleep(5)
-    
-    results = {}
-    
-    # 测试登录API
-    token = test_login_api()
-    results['login'] = token is not None
-    
-    # 测试ES搜索
-    results['es_search'] = test_es_search()
-    
-    # 测试Swagger UI
-    results['swagger_ui'] = test_swagger_ui()
-    
-    # 测试ES状态
-    results['es_status'] = test_elasticsearch_status()
-    
-    # 使用token测试其他API
-    if token:
-        test_knowledge_apis_with_token(token)
-        test_category_apis_with_token(token)
-        results['token_apis'] = True
-    else:
-        results['token_apis'] = False
-    
-    # 输出测试总结
-    print("\n🎉 测试完成！")
-    print("\n📋 测试结果:")
-    print(f"- 登录API: {'✅ 通过' if results.get('login') else '❌ 失败'}")
-    print(f"- ES搜索: {'✅ 通过' if results.get('es_search') else '❌ 失败'}")
-    print(f"- Swagger UI: {'✅ 通过' if results.get('swagger_ui') else '❌ 失败'}")
-    print(f"- ES状态: {'✅ 通过' if results.get('es_status') else '❌ 失败'}")
-    print(f"- Token API: {'✅ 通过' if results.get('token_apis') else '❌ 失败'}")
-    
-    print("\n💡 系统状态:")
-    print("- ✅ 认证已关闭，所有接口都可以直接访问")
-    print("- ✅ LDAP验证已跳过，支持任意用户名密码登录")
-    print("- ✅ ES搜索功能正常")
-    print("- ✅ Swagger UI可访问")
-    print("- ✅ 数据库连接正常")
-    
-    print("\n🔗 可用接口:")
-    print("- 登录: POST /api/auth/login")
-    print("- ES搜索: GET /api/es/search?query=关键词")
-    print("- Swagger UI: http://localhost:8080/swagger-ui/index.html")
-    print("- ES状态: http://localhost:9200")
+    """主函数"""
+    tester = CompleteSystemTester()
+    tester.run_all_tests()
 
 if __name__ == "__main__":
     main() 

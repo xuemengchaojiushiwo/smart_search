@@ -25,11 +25,11 @@ public class SearchController {
     private SearchService searchService;
     
     @PostMapping
-    @Operation(summary = "搜索知识", description = "根据关键词搜索知识内�?")
+    @Operation(summary = "搜索知识", description = "根据关键词搜索知识")
     public ApiResponse<SearchResultVO> search(
             @Parameter(description = "搜索请求", required = true) @Valid @RequestBody SearchRequest request) {
+        // 只查ES，异常让全局异常处理
         log.info("搜索知识: {}", request.getQuery());
-        // 暂时写死用户ID�?
         SearchResultVO result = searchService.searchKnowledge(request, 1L);
         return ApiResponse.success(result);
     }
