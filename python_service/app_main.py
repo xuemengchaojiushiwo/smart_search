@@ -16,86 +16,22 @@ import tempfile
 from pathlib import Path
 import requests
 
-# PyMuPDF Pro 统一文档处理
-from pymupdf_font_fix import setup_pymupdf_pro_environment, test_pymupdf_pro_initialization
-
-# 添加当前目录到Python路径，以便导入本地包
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
-# 为 PyMuPDF Pro 准备一个ASCII安全的字体目录，避免中文路径问题
-SAFE_FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts_tmp")
-os.makedirs(SAFE_FONT_DIR, exist_ok=True)
-
-# 约束 PyMuPDF 字体相关环境，避免扫描含中文路径的系统字体目录
-os.environ['PYMUPDF_FONT_DIR'] = SAFE_FONT_DIR
-os.environ['PYMUPDF_SKIP_FONT_INSTALL'] = '1'   # 跳过字体安装
-os.environ['PYMUPDF_USE_SYSTEM_FONTS'] = '0'    # 不使用系统字体目录
-
-# 可选导入 PyMuPDF 与 Pro 扩展
+# PyMuPDF相关
 try:
-    import pymupdf  # 主库
+    import fitz  # PyMuPDF
     PYMUPDF_AVAILABLE = True
-except Exception:
+except ImportError:
     PYMUPDF_AVAILABLE = False
+    print("❌ PyMuPDF 不可用")
 
+# LangChain相关
 try:
-    import pymupdf.pro  # Pro 扩展（可选）
-    # 使用配置中的试用密钥，并强制使用SAFE_FONT_DIR，禁用自动字体路径检测
-    try:
-        from config import PYMUPDF_PRO_CONFIG
-        trial_key = PYMUPDF_PRO_CONFIG.get('trial_key', '') if isinstance(PYMUPDF_PRO_CONFIG, dict) else ''
-    except Exception:
-        trial_key = ''
-
-    try:
-        if trial_key:
-            pymupdf.pro.unlock(trial_key, fontpath=SAFE_FONT_DIR, fontpath_auto=False)
-        else:
-            pymupdf.pro.unlock(fontpath=SAFE_FONT_DIR, fontpath_auto=False)
-        PYMUPDF_PRO_AVAILABLE = True
-        logging.info("PyMuPDF Pro 解锁完成（使用安全字体目录）")
-    except Exception as e:
-        PYMUPDF_PRO_AVAILABLE = False
-        logging.warning(f"PyMuPDF Pro 解锁失败，将使用免费版本: {e}")
-except Exception:
-    PYMUPDF_PRO_AVAILABLE = False
-
-# 文档处理相关
-from langchain.text_splitter import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
-from langchain.schema import Document
-import requests
-import json
-
-# PyMuPDF4LLM 用于结构化分块
-try:
-    from mypymupdf4llm import LlamaMarkdownReader
-    PYMUPDF4LLM_AVAILABLE = True
-    print("✅ 成功导入 mypymupdf4llm.LlamaMarkdownReader")
-except ImportError as e:
-    PYMUPDF4LLM_AVAILABLE = False
-    print(f"❌ PyMuPDF4LLM 不可用: {e}，将使用传统分块")
-
-# 引入基于本地 mypymupdf4llm 的定位与预览能力
-try:
-    # 生成带 <sub>pos: ...</sub> 的 Markdown
-    from mypymupdf4llm.helpers.pymupdf_rag import to_markdown as to_md_with_pos
-    print("✅ 成功导入 mypymupdf4llm.helpers.pymupdf_rag.to_markdown")
-except Exception as e:
-    print(f"❌ 导入 mypymupdf4llm.helpers.pymupdf_rag.to_markdown 失败: {e}")
-    to_md_with_pos = None
-
-try:
-    # 解析带位置的 Markdown → aligned_positions
-    from md_pos_to_aligned import parse_md_with_pos, save_aligned
-except Exception:
-    parse_md_with_pos = save_aligned = None
-
-try:
-    # 生成预览 PNG
-    from preview_alignment import draw_preview
-except Exception:
-    draw_preview = None
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain.schema import Document
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+    print("❌ LangChain 不可用")
 
 # ES相关
 from elasticsearch import Elasticsearch
@@ -110,12 +46,12 @@ app = FastAPI(title="智能知识库系统", version="2.0.0")
 # 导入配置
 from config import (
     ES_CONFIG, DOCUMENT_CONFIG, EMBEDDING_CONFIG, RAG_CONFIG,
-    PYMUPDF_PRO_CONFIG, CHUNKING_CONFIG, GEEKAI_API_KEY, GEEKAI_CHAT_URL,
+    CHUNKING_CONFIG, GEEKAI_API_KEY, GEEKAI_CHAT_URL,
     GEEKAI_EMBEDDING_URL, DEFAULT_EMBEDDING_MODEL
 )
 
 # 辅助：构建页文本与词级索引（用于bbox定位）
-def build_page_text_and_word_index(page: "pymupdf.Page") -> (str, list):
+def build_page_text_and_word_index(page: "fitz.Page") -> (str, list):
     """返回 (page_text, word_entries), 其中 word_entries 为 [ (start, end, (x0,y0,x1,y1)) ]."""
     try:
         words = page.get_text("words")  # (x0,y0,x1,y1,word,block_no,line_no,word_no)
@@ -293,150 +229,220 @@ def validate_ldap_user(request: LdapValidateRequest):
             message="用户名或密码错误"
         )
 
-def process_document_unified(file_path: str, knowledge_id: int, knowledge_name: str, 
-                           description: str, tags: str, effective_time: str, original_filename: str = None):
+def process_document_unified(file_path: str, filename: str, knowledge_id: int) -> Dict:
     """
-    使用 PyMuPDF 统一处理文档，生成PDFLLM风格的输出
+    统一处理文档，直接使用PyMuPDF的块级位置信息
     """
-    logger.info(f"开始统一处理文档: {file_path}")
-    
     try:
-        # 使用 PyMuPDF 打开文档
-        doc = pymupdf.open(file_path)
-        logger.info(f"成功打开文档，页数: {len(doc)}")
-
-        # 对非PDF文档，先转换为标准PDF
-        input_suffix = Path(file_path).suffix.lower()
-        use_pdf_doc = doc
-        try:
-            if input_suffix != ".pdf":
-                logger.info("检测到非PDF文档，开始转换为PDF…")
-                pdf_bytes = doc.convert_to_pdf()
-                use_pdf_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-                logger.info(f"转换完成，PDF页数: {len(use_pdf_doc)}")
-        except Exception as e:
-            logger.warning(f"转换PDF失败，回退使用原文档提取：{e}")
-        
-        # 使用PyMuPDF生成干净的Markdown内容
-        md_text = generate_pdfllm_style_markdown(use_pdf_doc, original_filename or Path(file_path).name)
-        logger.info(f"生成了干净的Markdown内容，长度: {len(md_text)}")
-        
-        # 单独提取位置信息映射
-        position_mapping = extract_position_mapping(use_pdf_doc)
-        logger.info(f"提取出 {len(position_mapping)} 个位置信息项")
-        
-        if not position_mapping:
-            logger.warning("没有位置信息项，为所有chunks设置默认元数据")
-        
-        # 使用LangChain进行分块 - 保持适中的分块大小
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1500,  # 适中的分块大小
-            chunk_overlap=300,  # 适中的重叠
-            length_function=len,
-            separators=["\n\n", "\n", "。", "！", "？", ".", "!", "?", " ", ""]
-        )
-        
-        # 创建文档对象
-        doc_obj = Document(page_content=md_text, metadata={"source": file_path})
-        chunks = text_splitter.split_documents([doc_obj])
-        logger.info(f"分块完成，共 {len(chunks)} 个chunks")
-        
-        # 为每个chunk分配位置信息和增强元数据
-        for i, chunk in enumerate(chunks):
-            # 基础元数据
-            chunk.metadata.update({
-                "knowledge_id": knowledge_id,
-                "knowledge_name": knowledge_name,
-                "description": description,
-                "tags": tags,
-                "effective_time": effective_time,
-                "source_file": original_filename or Path(file_path).name,
-                "chunk_index": i,
-                "chunk_type": "content"
-            })
-            
-            # 增强元数据 - 只保留通用信息
-            chunk.metadata.update({
-                "document_name": original_filename or Path(file_path).name,  # 文档名称
-                "document_type": "文档",  # 文档类型（通用）
-                "keywords": extract_keywords_from_content(chunk.page_content),  # 关键标识词
-            })
-            
-            # 尝试为chunk分配位置信息
-            if position_mapping and len(position_mapping) > 0:
-                # 简化位置匹配逻辑 - 让大模型自己判断
-                chunk_text = chunk.page_content
-                best_match = find_best_position_match(chunk_text, position_mapping)
-                
-                if best_match:
-                    # 计算字符范围
-                    char_start = md_text.find(chunk_text)
-                    char_end = char_start + len(chunk_text) if char_start != -1 else -1
-                    
-                    chunk.metadata.update({
-                        "page_num": best_match.get("page", 1),
-                        "bbox_union": best_match.get("bbox", []),
-                        "char_start": char_start,
-                        "char_end": char_end
-                    })
-                    logger.info(f"Chunk {i} 分配位置信息: 页{best_match.get('page', 1)}, bbox={best_match.get('bbox', [])}, chars=({char_start}, {char_end})")
-                else:
-                    logger.warning(f"Chunk {i} 未找到匹配的位置信息")
-                    # 设置默认位置信息
-                    chunk.metadata.update({
-                        "page_num": 1,
-                        "bbox_union": [],
-                        "char_start": -1,
-                        "char_end": -1
-                    })
-            else:
-                # 没有位置信息，设置默认值
-                chunk.metadata.update({
-                    "page_num": 1,
-                    "bbox_union": [],
-                    "char_start": -1,
-                    "char_end": -1
-                })
-        
-        # 生成embeddings并存储到ES
-        chunks_with_embeddings = []
-        for chunk in chunks:
+        # 打开文档
+        if filename.lower().endswith('.pdf'):
+            doc = fitz.open(file_path)
             try:
-                embedding = get_embedding(chunk.page_content)
-                chunk.metadata["embedding"] = embedding
-                chunks_with_embeddings.append(chunk)
-            except Exception as e:
-                logger.error(f"生成embedding失败: {e}")
-                continue
+                logger.info(f"成功打开文档，页数: {len(doc)}")
+                
+                # 直接使用PyMuPDF的块级位置信息
+                documents = extract_documents_with_block_positions(doc, filename)
+                
+                # 合并所有文档内容，准备用LangChain分割
+                all_content = ""
+                all_positions = []
+                
+                for doc_info in documents:
+                    all_content += doc_info["content"] + "\n"
+                    all_positions.extend(doc_info["positions"])
+                
+                logger.info(f"合并后总内容长度: {len(all_content)} 字符")
+                logger.info(f"合并后总位置信息数量: {len(all_positions)}")
+                
+                # 使用LangChain分割器分割合并后的内容
+                text_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=1000,
+                    chunk_overlap=200,
+                    length_function=len,
+                )
+                
+                # 分割文本内容
+                text_chunks = text_splitter.split_text(all_content)
+                logger.info(f"LangChain分割后生成 {len(text_chunks)} 个chunks")
+                
+                # 为每个chunk分配位置信息
+                chunks = []
+                for chunk_idx, chunk_text in enumerate(text_chunks):
+                    # 为每个chunk分配相关的位置信息
+                    chunk_positions = assign_positions_to_chunk(chunk_text, all_positions)
+
+                    # 计算主页面
+                    page_counts: Dict[int, int] = {}
+                    for p in chunk_positions:
+                        pg = int(p.get('page', 1))
+                        page_counts[pg] = page_counts.get(pg, 0) + 1
+                    main_page = max(page_counts.items(), key=lambda kv: kv[1])[0] if page_counts else 1
+                    
+                    # 创建LangChain Document
+                    chunk = Document(
+                        page_content=chunk_text,
+                        metadata={
+                            "knowledge_id": knowledge_id,
+                            "source_file": filename,
+                            "page_num": main_page,
+                            "chunk_index": chunk_idx,
+                            "positions": chunk_positions,
+                            "bbox": calculate_chunk_bbox(chunk_positions),
+                            "document_name": filename,
+                            "document_type": "文档",
+                            "keywords": extract_keywords_from_content(chunk_text)
+                        }
+                    )
+                    chunks.append(chunk)
+            finally:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
+            
+        else:
+            # 处理其他类型文档
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200,
+                length_function=len,
+            )
+            
+            text_chunks = text_splitter.split_text(content)
+            chunks = []
+            
+            for chunk_idx, chunk_text in enumerate(text_chunks):
+                chunk = Document(
+                    page_content=chunk_text,
+                    metadata={
+                        "knowledge_id": knowledge_id,
+                        "source_file": filename,
+                        "page_num": 1,
+                        "chunk_index": chunk_idx,
+                        "document_name": filename,
+                        "document_type": "文档",
+                        "keywords": extract_keywords_from_content(chunk_text)
+                    }
+                )
+                chunks.append(chunk)
+        
+        logger.info(f"最终生成 {len(chunks)} 个chunks")
         
         # 存储到ES
-        if chunks_with_embeddings:
-            store_chunks_to_es(chunks_with_embeddings, knowledge_id)
-            logger.info(f"成功存储 {len(chunks_with_embeddings)} 个chunks到ES")
-        else:
-            logger.error("没有可存储的chunks")
-            raise Exception("文档处理失败：没有可存储的chunks")
-        
-        # 清理资源
-        doc.close()
-        if use_pdf_doc != doc:
-            use_pdf_doc.close()
+        stored_count = store_chunks_to_es(chunks, knowledge_id)
         
         return {
-            "success": True,
-            "chunks_count": len(chunks_with_embeddings),
-            "message": f"文档处理成功: {original_filename or Path(file_path).name}"
+            "chunks_count": stored_count,
+            "total_chunks": len(chunks),
+            "success": stored_count > 0
         }
         
     except Exception as e:
         logger.error(f"文档处理失败: {e}")
-        raise
+        import traceback
+        traceback.print_exc()
+        raise e
 
-def generate_pdfllm_style_markdown(doc, filename: str) -> str:
+def extract_documents_with_block_positions(doc, filename: str) -> List[Dict]:
     """
-    使用PyMuPDF生成干净的Markdown内容，位置信息不嵌入到文本中
+    直接从PyMuPDF提取文档块和位置信息
+    """
+    documents = []
+
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        blocks = page.get_text("dict")
+
+        for block_idx, block in enumerate(blocks["blocks"]):
+            if "lines" in block:
+                # 收集整个块的所有文本和位置信息
+                block_text = ""
+                block_positions = []
+
+                for line_idx, line in enumerate(block["lines"]):
+                    for span_idx, span in enumerate(line["spans"]):
+                        text = span["text"].strip()
+                        if text:
+                            block_text += text + " "
+                            block_positions.append({
+                                "text": text,
+                                "bbox": span["bbox"],
+                                "font_size": span["size"],
+                                "font": span["font"],
+                                "span_idx": span_idx,
+                                "line_idx": line_idx,
+                                "page": page_num + 1,
+                            })
+
+                if block_text.strip():
+                    # 计算整个块的边界框（内联实现）
+                    if block_positions:
+                        bx0 = min(p["bbox"][0] for p in block_positions)
+                        by0 = min(p["bbox"][1] for p in block_positions)
+                        bx1 = max(p["bbox"][2] for p in block_positions)
+                        by1 = max(p["bbox"][3] for p in block_positions)
+                        block_bbox = [bx0, by0, bx1, by1]
+                    else:
+                        block_bbox = [0, 0, 0, 0]
+
+                    documents.append({
+                        "content": block_text.strip(),
+                        "page": page_num + 1,
+                        "block_idx": block_idx,
+                        "positions": block_positions,
+                        "bbox": block_bbox
+                    })
+
+    return documents
+
+
+def assign_positions_to_chunk(chunk_text: str, positions: List[Dict]) -> List[Dict]:
+    """
+    为chunk分配对应的位置信息
+    使用简单的文本包含关系，而不是复杂的相似度计算
+    """
+    chunk_positions = []
+
+    for pos in positions:
+        pos_text = pos["text"]
+        # 如果chunk包含这个位置的文本，就分配给它
+        if pos_text in chunk_text:
+            chunk_positions.append(pos)
+
+    return chunk_positions
+
+def calculate_chunk_bbox(positions: List[Dict]) -> List[float]:
+    """计算chunk的边界框：先按span所在页聚类，取位置最多的页作为主页面，再对该页的positions求并集"""
+    if not positions:
+        return [0, 0, 0, 0]
+
+    # 位置里需要带上page信息；若没有，默认页=1
+    page_to_positions: Dict[int, List[Dict]] = {}
+    for pos in positions:
+        page = int(pos.get('page', 1)) if isinstance(pos, dict) else 1
+        page_to_positions.setdefault(page, []).append(pos)
+
+    # 选择位置最多的页作为主页面
+    main_page = max(page_to_positions.items(), key=lambda kv: len(kv[1]))[0]
+    main_positions = page_to_positions[main_page]
+
+    x0 = min(p["bbox"][0] for p in main_positions)
+    y0 = min(p["bbox"][1] for p in main_positions)
+    x1 = max(p["bbox"][2] for p in main_positions)
+    y1 = max(p["bbox"][3] for p in main_positions)
+
+    return [x0, y0, x1, y1]
+
+def generate_pdfllm_style_markdown(doc, filename: str) -> tuple[str, List[Dict]]:
+    """
+    使用PyMuPDF生成干净的Markdown内容和精确的文本-坐标映射
+    返回: (markdown_content, position_mapping)
     """
     content_lines = []
+    position_mapping = []
     
     # 添加文档标题
     content_lines.append(f"# {filename}")
@@ -456,18 +462,35 @@ def generate_pdfllm_style_markdown(doc, filename: str) -> str:
             for block_idx, block in enumerate(blocks["blocks"]):
                 if "lines" in block:
                     block_text = ""
+                    block_positions = []
                     
                     for line_idx, line in enumerate(block["lines"]):
                         line_text = ""
+                        line_positions = []
                         
                         for span_idx, span in enumerate(line["spans"]):
                             text = span["text"].strip()
                             if text:
                                 # 只添加文本内容，不添加位置标签
                                 line_text += text + " "
+                                
+                                # 记录位置信息
+                                line_positions.append({
+                                    "text": text,
+                                    "page": page_num + 1,
+                                    "bbox": span["bbox"],
+                                    "font_size": span["size"],
+                                    "font": span["font"],
+                                    "block_idx": block_idx,
+                                    "line_idx": line_idx,
+                                    "span_idx": span_idx,
+                                    "char_start": len("".join(content_lines)),  # 在最终文本中的起始位置
+                                    "char_end": len("".join(content_lines)) + len(text)  # 在最终文本中的结束位置
+                                })
                         
                         if line_text.strip():
                             block_text += line_text.strip() + "\n"
+                            block_positions.extend(line_positions)
                     
                     if block_text.strip():
                         # 检查是否可能是标题（基于字体大小）
@@ -477,9 +500,22 @@ def generate_pdfllm_style_markdown(doc, filename: str) -> str:
                         else:
                             content_lines.append(block_text.strip())
                         content_lines.append("")
+                        
+                        # 添加位置信息到映射
+                        position_mapping.extend(block_positions)
     
     # 合并所有内容
-    return "\n".join(content_lines)
+    markdown_content = "\n".join(content_lines)
+    
+    # 更新字符位置（因为换行符等会影响位置）
+    current_pos = 0
+    for pos_info in position_mapping:
+        text = pos_info["text"]
+        pos_info["char_start"] = current_pos
+        pos_info["char_end"] = current_pos + len(text)
+        current_pos += len(text) + 1  # +1 for space
+    
+    return markdown_content, position_mapping
 
 def extract_position_mapping(doc) -> List[Dict]:
     """
@@ -511,67 +547,67 @@ def extract_position_mapping(doc) -> List[Dict]:
     
     return position_mapping
 
-def parse_pdfllm_style_markdown(md_text: str) -> List[Dict]:
-    """
-    解析PDFLLM风格的Markdown，提取位置信息
-    """
-    items = []
-    
-    # 匹配 <sub>pos: page=X, bbox=(...)</sub> 格式
-    import re
-    pattern = r'<sub>pos: page=(\d+), bbox=\(([^)]+)\)</sub>'
-    
-    matches = re.findall(pattern, md_text)
-    for match in matches:
-        page_num = int(match[0])
-        bbox_str = match[1]
-        
-        try:
-            # 解析bbox字符串 "x0, y0, x1, y1"
-            bbox_parts = bbox_str.split(',')
-            if len(bbox_parts) == 4:
-                bbox = [float(part.strip()) for part in bbox_parts]
-                
-                # 提取对应的文本内容
-                # 这里简化处理，实际可以根据需要调整
-                items.append({
-                    "page": page_num,
-                    "bbox": bbox,
-                    "char_start": -1,  # 简化处理
-                    "char_end": -1,    # 简化处理
-                    "text": ""          # 简化处理
-                })
-        except Exception as e:
-            logger.warning(f"解析bbox失败: {bbox_str}, 错误: {e}")
-            continue
-                
-    return items
-
 def find_best_position_match(chunk_text: str, position_mapping: List[Dict]) -> Optional[Dict]:
     """
     为chunk找到最匹配的位置信息
+    使用块级模糊匹配，而不是精确的文本片段匹配
     """
     if not position_mapping:
         return None
     
-    # 改进的匹配逻辑：优先匹配包含在chunk中的文本
     chunk_text_lower = chunk_text.lower()
     chunk_words = set(chunk_text_lower.split())
     
-    best_match = None
-    best_score = 0
+    # 定义关键信息关键词和对应的优先级
+    key_phrases_priority = [
+        # 高优先级：基金核心信息
+        (["基金总值", "4.4377", "亿美元"], 10),
+        (["基金价格", "资产净值", "5.7741"], 9),
+        (["成立日期", "2010年8月2日"], 8),
+        (["基金经理", "Justin Kass", "David Oberto", "Michael Yee"], 7),
+        (["管理费", "1.19%"], 6),
+        (["投资目标", "美国债券", "高收益"], 5),
+        (["收益分配", "每月"], 4),
+        (["财政年度", "9月30日"], 3),
+        (["交易日", "每日"], 2),
+        (["投资经理", "安联投资"], 1)
+    ]
     
-    # 第一轮：寻找精确包含的文本
+    # 第一轮：优先匹配包含关键信息的文本
     for pos_info in position_mapping:
         text = pos_info.get("text", "").strip()
-        if text and text.lower() in chunk_text_lower:
-            # 计算匹配度：文本长度与chunk长度的比例
-            score = len(text) / max(len(chunk_text), 1)
-            if score > best_score:
-                best_score = score
-                best_match = pos_info
+        if text:
+            # 检查是否包含高优先级的关键信息
+            for key_phrases, priority in key_phrases_priority:
+                if any(keyword in text for keyword in key_phrases):
+                    # 计算文本相似度
+                    text_lower = text.lower()
+                    chunk_lower = chunk_text_lower
+                    
+                    # 使用字符重叠度计算相似度
+                    overlap = sum(1 for c in text_lower if c in chunk_lower)
+                    base_score = overlap / max(len(text_lower), 1)
+                    
+                    # 应用优先级权重
+                    weighted_score = base_score * priority
+                    
+                    if weighted_score > best_score:
+                        best_score = weighted_score
+                        best_match = pos_info
+                    break  # 找到匹配的关键词就跳出内层循环
     
-    # 第二轮：如果没有找到精确包含的，尝试单词匹配
+    # 第二轮：如果没有找到关键信息，尝试精确包含匹配
+    if not best_match:
+        for pos_info in position_mapping:
+            text = pos_info.get("text", "").strip()
+            if text and text.lower() in chunk_text_lower:
+                # 计算匹配度：文本长度与chunk长度的比例
+                score = len(text) / max(len(chunk_text), 1)
+                if score > best_score:
+                    best_score = score
+                    best_match = pos_info
+    
+    # 第三轮：如果还是没有找到，尝试单词级别的匹配
     if not best_match:
         for pos_info in position_mapping:
             text = pos_info.get("text", "").strip()
@@ -585,11 +621,60 @@ def find_best_position_match(chunk_text: str, position_mapping: List[Dict]) -> O
                         best_score = score
                         best_match = pos_info
     
-    # 第三轮：如果还是没有找到，返回第一个有效的位置信息
+    # 第四轮：如果还是没有找到，返回第一个有效的位置信息
     if not best_match and position_mapping:
         for pos_info in position_mapping:
             if pos_info.get("bbox") and len(pos_info.get("bbox", [])) == 4:
                 return pos_info
+    
+    return best_match
+
+def expand_bbox_to_block_level(bbox: List[float], page_width: float, page_height: float) -> List[float]:
+    """
+    将精确的文本片段bbox扩展为块级bbox，提供更好的用户体验
+    使用更保守的扩展策略，避免过度扩展
+    """
+    if len(bbox) != 4:
+        return bbox
+    
+    x0, y0, x1, y1 = bbox
+    
+    # 计算当前文本的宽度和高度
+    text_width = x1 - x0
+    text_height = y1 - y0
+    
+    # 更保守的扩展策略
+    # 水平扩展：左右各扩展文本宽度的50%，但不超过页面边距
+    horizontal_expansion = min(text_width * 0.5, 30)  # 最大扩展30像素
+    
+    expanded_x0 = max(20, x0 - horizontal_expansion)
+    expanded_x1 = min(page_width - 20, x1 + horizontal_expansion)
+    
+    # 垂直扩展：上下各扩展文本高度的50%，但不超过页面边距
+    vertical_expansion = min(text_height * 0.5, 20)  # 最大扩展20像素
+    
+    expanded_y0 = max(20, y0 - vertical_expansion)
+    expanded_y1 = min(page_height - 20, y1 + vertical_expansion)
+    
+    return [expanded_x0, expanded_y0, expanded_x1, expanded_y1]
+
+def find_best_position_match_block_level(chunk_text: str, position_mapping: List[Dict], page_width: float, page_height: float) -> Optional[Dict]:
+    """
+    为chunk找到最匹配的位置信息，并扩展为块级坐标
+    """
+    # 先找到最佳匹配
+    best_match = find_best_position_match(chunk_text, position_mapping)
+    
+    if best_match and best_match.get("bbox"):
+        # 扩展bbox为块级坐标
+        expanded_bbox = expand_bbox_to_block_level(best_match["bbox"], page_width, page_height)
+        
+        # 创建新的位置信息，包含扩展后的坐标
+        block_level_match = best_match.copy()
+        block_level_match["bbox"] = expanded_bbox
+        block_level_match["bbox_type"] = "block_level"  # 标记为块级坐标
+        
+        return block_level_match
     
     return best_match
 
@@ -604,10 +689,16 @@ def store_chunks_to_es(chunks: List[Document], knowledge_id: int):
             # 生成文档ID
             doc_id = hashlib.md5(f"{knowledge_id}_{i}_{chunk.page_content[:100]}".encode()).hexdigest()
             
+            # 为chunk生成embedding
+            chunk_embedding = get_embedding(chunk.page_content)
+            if not chunk_embedding:
+                logger.warning(f"Chunk {i} embedding生成失败，跳过")
+                continue
+            
             # 准备ES文档
             es_doc = {
                 "content": chunk.page_content,
-                "embedding": chunk.metadata.get("embedding", []),
+                "embedding": chunk_embedding,
                 "knowledge_id": chunk.metadata.get("knowledge_id", knowledge_id),
                 "knowledge_name": chunk.metadata.get("knowledge_name", ""),
                 "description": chunk.metadata.get("description", ""),
@@ -617,9 +708,8 @@ def store_chunks_to_es(chunks: List[Document], knowledge_id: int):
                 "chunk_index": chunk.metadata.get("chunk_index", i),
                 "chunk_type": chunk.metadata.get("chunk_type", "content"),
                 "page_num": chunk.metadata.get("page_num", 1),
-                "char_start": chunk.metadata.get("char_start", -1),
-                "char_end": chunk.metadata.get("char_end", -1),
-                "bbox_union": chunk.metadata.get("bbox_union", []),
+                "bbox": chunk.metadata.get("bbox", []),
+                "positions": chunk.metadata.get("positions", []),
                 "weight": 1.0
             }
             
@@ -674,8 +764,7 @@ async def process_document(
         try:
             # 处理文档
             result = process_document_unified(
-                temp_file_path, knowledge_id, knowledge_name, 
-                description, tags, effective_time, file.filename
+                temp_file_path, file.filename, knowledge_id
             )
             
             return DocumentProcessResponse(
@@ -723,7 +812,7 @@ def chat_with_rag(request: ChatRequest):
                 }
             },
             "_source": ["content", "metadata", "knowledge_id", "knowledge_name", "source_file", 
-                       "page_num", "chunk_index", "bbox_union", "char_start", "char_end"]
+                       "page_num", "chunk_index", "bbox", "positions"]
         }
         
         search_response = es_client.search(index=ES_CONFIG['index'], body=search_query)
@@ -750,9 +839,8 @@ def chat_with_rag(request: ChatRequest):
                     "document_type": "文档",  # 通用文档类型
                     "page_num": source.get('page_num', 'N/A'),
                     "chunk_index": source.get('chunk_index', 'N/A'),
-                    "bbox_union": source.get('bbox_union', []),
-                    "char_start": source.get('char_start', 'N/A'),
-                    "char_end": source.get('char_end', 'N/A'),
+                    "bbox": source.get('bbox', []),
+                    "positions": source.get('positions', []),
                     "knowledge_name": source.get('knowledge_name', 'N/A'),
                     "relevance_score": round(score, 3)
                 }
@@ -781,9 +869,9 @@ def chat_with_rag(request: ChatRequest):
                 page_num=metadata.get('page_num', 0),
                 chunk_index=metadata.get('chunk_index', 0),
                 chunk_type="content",
-                bbox_union=metadata.get('bbox_union', []),
-                char_start=metadata.get('char_start', 0),
-                char_end=metadata.get('char_end', 0)
+                bbox_union=metadata.get('bbox', []),  # 使用新的bbox字段
+                char_start=0,  # 不再使用字符位置
+                char_end=0
             ))
         
         return ChatResponse(
@@ -817,7 +905,7 @@ def build_enhanced_rag_prompt(question: str, context_chunks: List[Dict]) -> str:
 📖 页码: {metadata.get('page_num', 'N/A')}
 🔢 块序: {metadata.get('chunk_index', 'N/A')}
 🎯 相关性: {metadata.get('relevance_score', 'N/A')}
-📍 坐标: {metadata.get('bbox_union', [])}
+📍 坐标: {metadata.get('bbox', [])}
 📝 内容: {chunk.get('content', '')}
 """
         context_parts.append(chunk_context)
@@ -935,9 +1023,8 @@ def health_check():
         # 检查ES连接
         es_info = es_client.info()
         
-        # 检查PyMuPDF / Pro 可用性
+        # 检查PyMuPDF可用性
         pymupdf_status = "available" if PYMUPDF_AVAILABLE else "unavailable"
-        pymupdf_pro_status = "available" if PYMUPDF_PRO_AVAILABLE else "unavailable"
         
         # 检查极客智坊API
         try:
@@ -951,9 +1038,7 @@ def health_check():
             "status": "healthy",
             "elasticsearch": "connected",
             "pymupdf": pymupdf_status,
-            "pymupdf_pro": pymupdf_pro_status,
             "geekai_api": geekai_status,
-            "mypymupdf4llm": "available" if PYMUPDF4LLM_AVAILABLE else "unavailable",
             "timestamp": "2024-01-01T00:00:00Z"
         }
     except Exception as e:

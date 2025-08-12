@@ -38,7 +38,7 @@ public class ElasticsearchService {
     @Autowired
     private RestHighLevelClient elasticsearchClient;
 
-    private static final String INDEX_NAME = "knowledge_base";
+    private static final String INDEX_NAME = "knowledge_base_new";
 
     /**
      * 索引知识文档（创建或更新）

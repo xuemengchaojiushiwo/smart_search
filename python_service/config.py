@@ -2,12 +2,12 @@
 
 # Elasticsearch配置
 ES_CONFIG = {
-    "host": "localhost",
-    "port": 9200,
-    "index": "knowledge_base",
-    "username": "elastic",
-    "password": "password",
-    "verify_certs": False
+    'host': 'localhost',
+    'port': 9200,
+    'index': 'knowledge_base_new',  # 更新索引名称
+    'username': 'elastic',
+    'password': 'password',
+    'verify_certs': False
 }
 
 # 文档处理配置

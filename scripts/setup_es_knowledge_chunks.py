@@ -9,7 +9,7 @@ import requests
 import json
 
 ES_BASE = "http://localhost:9200"
-INDEX = "knowledge_base"  # 若你想独立索引，可改为 knowledge_chunks，并在服务中同步修改 ES_CONFIG['index']
+INDEX = "knowledge_base_new"  # 使用新名称避免冲突
 AUTH = ("elastic", "password")
 
 mapping = {
@@ -31,8 +31,8 @@ mapping = {
             "chunk_type": {"type": "keyword"},
             "weight": {"type": "float"},
             "page_num": {"type": "integer"},
-            "char_start": {"type": "integer"},
-            "char_end": {"type": "integer"},
+            "bbox": {"type": "float"},  # 新的边界框字段 [x0, y0, x1, y1]
+            "positions": {"type": "object", "enabled": False},  # 新的位置信息字段
             "content": {"type": "text"},
             "embedding": {"type": "dense_vector", "dims": 1536}
         }
