@@ -57,6 +57,9 @@ public class ElasticsearchService {
             document.put("content", knowledge.getDescription());
             document.put("category_id", knowledge.getCategoryId());
             document.put("tags", knowledge.getTags());
+            if (knowledge.getTableData() != null) {
+                document.put("table_data", knowledge.getTableData());
+            }
             document.put("author", knowledge.getCreatedBy());
             document.put("status", knowledge.getStatus());
             document.put("search_count", knowledge.getSearchCount());
@@ -130,6 +133,9 @@ public class ElasticsearchService {
             document.put("status", knowledge.getStatus());
             document.put("search_count", knowledge.getSearchCount());
             document.put("download_count", knowledge.getDownloadCount());
+            if (knowledge.getTableData() != null) {
+                document.put("table_data", knowledge.getTableData());
+            }
 
             // 时间字段
             if (knowledge.getEffectiveStartTime() != null) {
@@ -196,6 +202,32 @@ public class ElasticsearchService {
     }
 
     /**
+     * 删除某个知识下某个文件对应的所有分块文档（按 knowledge_id + source_file）
+     */
+    public void deleteChunksByKnowledgeAndFile(Long knowledgeId, String fileName) {
+        try {
+            // 使用 delete-by-query REST 调用，避免高阶客户端的包兼容问题
+            String endpoint = "/" + INDEX_NAME + "/_delete_by_query";
+            org.elasticsearch.client.Request request = new org.elasticsearch.client.Request("POST", endpoint);
+            String body = "{\n" +
+                    "  \"query\": {\n" +
+                    "    \"bool\": {\n" +
+                    "      \"filter\": [\n" +
+                    "        {\"term\": {\"knowledge_id\": " + knowledgeId + "}},\n" +
+                    "        {\"term\": {\"source_file\": \"" + fileName.replace("\"", "\\\"") + "\"}}\n" +
+                    "      ]\n" +
+                    "    }\n" +
+                    "  }\n" +
+                    "}";
+            request.setJsonEntity(body);
+            org.elasticsearch.client.Response resp = elasticsearchClient.getLowLevelClient().performRequest(request);
+            log.info("ES删除附件相关chunks完成: knowledgeId={}, fileName={}, status={}", knowledgeId, fileName, resp.getStatusLine());
+        } catch (Exception e) {
+            log.warn("ES删除附件相关chunks异常: knowledgeId={}, fileName={}, error={}", knowledgeId, fileName, e.getMessage());
+        }
+    }
+
+    /**
      * 搜索知识
      * 支持标题、标签、内容、附件名搜索
      *
@@ -210,16 +242,21 @@ public class ElasticsearchService {
             SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
             SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
 
-            // 多字段匹配查询
+            // 多字段匹配查询（仅针对知识元数据文档，不包含chunk内容文档）
             MultiMatchQueryBuilder multiMatchQuery = QueryBuilders.multiMatchQuery(query)
-                    .field("title", 3.0f)           // 标题权重最高
-                    .field("content", 2.0f)         // 内容权重较高
-                    .field("tags", 2.0f)            // 标签权重较高
-                    .field("attachment_names", 1.5f) // 附件名权重中等
-                    .field("author", 1.0f)          // 作者权重较低
+                    .field("title", 3.0f)            // 知识名称
+                    .field("content", 1.5f)          // 知识描述
+                    .field("tags", 2.0f)             // 标签
+                    .field("attachment_names", 1.8f) // 附件文件名
+                    .field("author", 1.0f)           // 作者
                     .type(MultiMatchQueryBuilder.Type.BEST_FIELDS);
 
-            searchSourceBuilder.query(multiMatchQuery);
+            // 过滤条件：仅返回包含 source.id 的文档（知识元数据），排除chunk文档
+            org.elasticsearch.index.query.BoolQueryBuilder boolQuery = QueryBuilders.boolQuery()
+                    .must(multiMatchQuery)
+                    .filter(QueryBuilders.existsQuery("id"));
+
+            searchSourceBuilder.query(boolQuery);
 
             // 分页（加下界保护，防止 from 为负或 size 非法）
             int safePage = page > 0 ? page : 1;
@@ -317,13 +354,17 @@ public class ElasticsearchService {
 
             MultiMatchQueryBuilder multiMatchQuery = QueryBuilders.multiMatchQuery(query)
                     .field("title", 3.0f)
-                    .field("content", 2.0f)
+                    .field("content", 1.5f)
                     .field("tags", 2.0f)
-                    .field("attachment_names", 1.5f)
+                    .field("attachment_names", 1.8f)
                     .field("author", 1.0f)
                     .type(MultiMatchQueryBuilder.Type.BEST_FIELDS);
 
-            searchSourceBuilder.query(multiMatchQuery);
+            org.elasticsearch.index.query.BoolQueryBuilder boolQuery = QueryBuilders.boolQuery()
+                    .must(multiMatchQuery)
+                    .filter(QueryBuilders.existsQuery("id"));
+
+            searchSourceBuilder.query(boolQuery);
             searchSourceBuilder.size(0); // 只获取总数，不返回文档
 
             searchRequest.source(searchSourceBuilder);

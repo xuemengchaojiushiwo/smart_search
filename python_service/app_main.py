@@ -14,6 +14,9 @@ import logging
 import os
 import tempfile
 from pathlib import Path
+import subprocess
+from shutil import which
+import shutil
 import requests
 
 # PyMuPDF相关
@@ -23,6 +26,14 @@ try:
 except ImportError:
     PYMUPDF_AVAILABLE = False
     print("❌ PyMuPDF 不可用")
+
+# 可选：用于优化Excel分页的预处理
+try:
+    from openpyxl import load_workbook
+    from openpyxl.worksheet.properties import PageSetupProperties
+    OPENPYXL_AVAILABLE = True
+except Exception:
+    OPENPYXL_AVAILABLE = False
 
 # LangChain相关
 try:
@@ -49,6 +60,7 @@ from config import (
     CHUNKING_CONFIG, GEEKAI_API_KEY, GEEKAI_CHAT_URL,
     GEEKAI_EMBEDDING_URL, DEFAULT_EMBEDDING_MODEL
 )
+from fastapi.responses import FileResponse
 
 # 辅助：构建页文本与词级索引（用于bbox定位）
 def build_page_text_and_word_index(page: "fitz.Page") -> (str, list):
@@ -210,6 +222,297 @@ def read_root():
         ]
     }
 
+# ===== LibreOffice 转PDF（不改动原文件）=====
+def _find_soffice_path() -> Optional[str]:
+    candidates = [
+        r"C:\\Program Files\\LibreOffice\\program\\soffice.exe",
+        r"C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe",
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    w = which("soffice") or which("soffice.exe")
+    return w
+
+def convert_with_libreoffice_safe(src_path: str, timeout_sec: int = 180, out_dir: Optional[str] = None) -> str:
+    """使用LibreOffice将任意Office文档转为PDF，输出到临时文件夹，返回PDF路径。"""
+    soffice = _find_soffice_path()
+    if not soffice:
+        raise RuntimeError("未找到LibreOffice的soffice.exe，请安装或配置PATH后重试")
+
+    if not out_dir:
+        out_dir = tempfile.mkdtemp(prefix="lo_pdf_")
+    else:
+        os.makedirs(out_dir, exist_ok=True)
+    cmd = [
+        soffice,
+        "--headless",
+        "--norestore",
+        "--nolockcheck",
+        "--convert-to", "pdf",
+        "--outdir", out_dir,
+        os.path.abspath(src_path),
+    ]
+    cp = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
+    if cp.returncode != 0:
+        raise RuntimeError(f"LibreOffice 转换失败: rc={cp.returncode}\nstdout={cp.stdout}\nstderr={cp.stderr}")
+
+    # 期望同名pdf
+    expected = os.path.join(out_dir, Path(src_path).with_suffix('.pdf').name)
+    if os.path.exists(expected):
+        return expected
+    # 兜底找最新pdf
+    pdfs = [p for p in os.listdir(out_dir) if p.lower().endswith('.pdf')]
+    if not pdfs:
+        raise RuntimeError(f"LibreOffice 未生成PDF。stdout={cp.stdout}\nstderr={cp.stderr}")
+    pdfs.sort(key=lambda n: os.path.getmtime(os.path.join(out_dir, n)), reverse=True)
+    return os.path.join(out_dir, pdfs[0])
+
+def create_simple_pdf_from_txt(src_path: str, out_path: Optional[str] = None) -> str:
+    """TXT 降级方案：将文本简单排版写入单页/多页PDF，便于坐标回显。"""
+    with open(src_path, 'r', encoding='utf-8', errors='ignore') as f:
+        text = f.read()
+    out_pdf = out_path or tempfile.mktemp(suffix='.pdf')
+    os.makedirs(os.path.dirname(out_pdf), exist_ok=True)
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    rect = fitz.Rect(40, 50, 555, 800)
+    page.insert_textbox(rect, text[:50000], fontsize=11, fontname="helv", align=0)
+    doc.save(out_pdf)
+    doc.close()
+    return out_pdf
+
+# ===== 持久化存储的转换PDF路径 =====
+CONVERTED_PDF_ROOT = os.path.join(os.path.dirname(__file__), 'static', 'converted')
+
+def build_converted_pdf_path(knowledge_id: int, original_filename: str) -> str:
+    base = Path(original_filename).stem + '.pdf'
+    target_dir = os.path.join(CONVERTED_PDF_ROOT, str(knowledge_id))
+    os.makedirs(target_dir, exist_ok=True)
+    return os.path.join(target_dir, base)
+
+def preprocess_xlsx_for_better_pdf(src_path: str) -> Optional[str]:
+    """
+    针对Excel进行分页优化：横向、按宽度适配、设置打印区域与边距；
+    生成临时xlsx副本（不改动原文件）。返回临时文件路径；失败返回None。
+    """
+    if not OPENPYXL_AVAILABLE:
+        return None
+
+# ===== Excel 原生解析，不转PDF =====
+def parse_excel_native(file_path: str, filename: str, knowledge_id: int) -> List[Document]:
+    if not OPENPYXL_AVAILABLE:
+        raise RuntimeError("缺少openpyxl，无法原生解析Excel。请安装: pip install openpyxl")
+    wb = load_workbook(file_path, data_only=True)
+    chunks: List[Document] = []
+
+    # 构建每个sheet的虚拟坐标网格
+    for sheet_idx, ws in enumerate(wb.worksheets):
+        # 列宽、行高 → 像素近似（Excel宽度单位转像素，这里做简单近似）
+        col_widths = []
+        for col in ws.columns:
+            # openpyxl列宽在 ws.column_dimensions[col_letter].width
+            break
+        # 收集列宽（若未设置，给默认 8.43 字符宽 ≈ 64px）
+        from openpyxl.utils import get_column_letter
+        max_col = ws.max_column
+        max_row = ws.max_row
+        for c in range(1, max_col + 1):
+            letter = get_column_letter(c)
+            cw = ws.column_dimensions.get(letter).width if ws.column_dimensions.get(letter) and ws.column_dimensions.get(letter).width else 8.43
+            # 近似：1字符宽≈7.5px
+            col_widths.append(float(cw) * 7.5)
+        row_heights = []
+        for r in range(1, max_row + 1):
+            rh = ws.row_dimensions.get(r).height if ws.row_dimensions.get(r) and ws.row_dimensions.get(r).height else 15.0
+            # 近似：1pt≈1.33px，Excel默认行高≈15pt
+            row_heights.append(float(rh) * 1.33)
+
+        # 前缀和得到各列x、各行y起点
+        x_starts = [0.0]
+        for w in col_widths:
+            x_starts.append(x_starts[-1] + w)
+        y_starts = [0.0]
+        for h in row_heights:
+            y_starts.append(y_starts[-1] + h)
+
+        # 构建单元格positions
+        positions: List[Dict] = []
+        for r in range(1, max_row + 1):
+            for c in range(1, max_col + 1):
+                cell = ws.cell(row=r, column=c)
+                text = str(cell.value) if cell.value is not None else ""
+                if not text.strip():
+                    continue
+                # 合并单元格处理：取所属合并区的外接矩形
+                merged_bbox = None
+                for rng in ws.merged_cells.ranges:
+                    if (r, c) in rng.cells:
+                        min_row, min_col, max_row_, max_col_ = rng.min_row, rng.min_col, rng.max_row, rng.max_col
+                        x0 = x_starts[min_col - 1]
+                        y0 = y_starts[min_row - 1]
+                        x1 = x_starts[max_col_]
+                        y1 = y_starts[max_row_]
+                        merged_bbox = [x0, y0, x1, y1]
+                        break
+                if merged_bbox:
+                    bbox = merged_bbox
+                else:
+                    x0 = x_starts[c - 1]
+                    y0 = y_starts[r - 1]
+                    x1 = x_starts[c]
+                    y1 = y_starts[r]
+                    bbox = [x0, y0, x1, y1]
+
+                positions.append({
+                    "text": text.strip(),
+                    "bbox": bbox,
+                    "sheet": ws.title,
+                    "row": r,
+                    "col": c,
+                })
+
+        # 生成纯文本内容（按行拼接）
+        lines = []
+        for r in range(1, max_row + 1):
+            vals = []
+            for c in range(1, max_col + 1):
+                val = ws.cell(row=r, column=c).value
+                vals.append("" if val is None else str(val))
+            lines.append("\t".join(vals).rstrip())
+        all_text = "\n".join(lines)
+
+        # 分块（按字符）
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200,
+            length_function=len,
+        )
+        text_chunks = splitter.split_text(all_text)
+
+        # 将positions按文本包含关系分配给chunk
+        for chunk_idx, chunk_text in enumerate(text_chunks):
+            chunk_positions = []
+            # 简单包含匹配：单元格文本在chunk中出现则纳入（大多数表格有效）
+            for p in positions:
+                t = p["text"]
+                if t and t in chunk_text:
+                    chunk_positions.append(p)
+
+            # 计算块级bbox：所有单元格bbox并集（同一sheet）
+            if chunk_positions:
+                x0 = min(pp["bbox"][0] for pp in chunk_positions)
+                y0 = min(pp["bbox"][1] for pp in chunk_positions)
+                x1 = max(pp["bbox"][2] for pp in chunk_positions)
+                y1 = max(pp["bbox"][3] for pp in chunk_positions)
+                bbox = [x0, y0, x1, y1]
+            else:
+                bbox = [0, 0, 0, 0]
+
+            chunks.append(Document(
+                page_content=chunk_text,
+                metadata={
+                    "knowledge_id": knowledge_id,
+                    "source_file": filename,
+                    "page_num": sheet_idx + 1,  # 将 sheet 当作“页”
+                    "chunk_index": len(chunks),
+                    "positions": chunk_positions,
+                    "bbox": bbox,
+                    "document_name": filename,
+                    "document_type": "表格",
+                    "sheet_name": ws.title,
+                    "keywords": extract_keywords_from_content(chunk_text),
+                }
+            ))
+
+    return chunks
+
+# ===== TXT 原生解析，不转PDF =====
+def parse_txt_native(file_path: str, filename: str, knowledge_id: int) -> List[Document]:
+    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        content = f.read()
+    # 归一化换行
+    content = content.replace('\r\n', '\n').replace('\r', '\n')
+    lines = content.split('\n')
+
+    # 行级positions（不做真实像素坐标，记录行列与字符区间）
+    positions: List[Dict] = []
+    global_pos = 0
+    for i, line in enumerate(lines, start=1):
+        text = line
+        start = global_pos
+        end = start + len(text)
+        positions.append({
+            "text": text,
+            "line_no": i,
+            "char_start": start,
+            "char_end": end,
+        })
+        global_pos = end + 1  # 计入换行
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len,
+    )
+    text_chunks = splitter.split_text(content)
+
+    chunks: List[Document] = []
+    for idx, chunk_text in enumerate(text_chunks):
+        # 为chunk分配行段positions
+        chunk_positions = []
+        # 通过字符范围粗匹配（行文本在chunk中出现时纳入）
+        for p in positions:
+            t = p["text"]
+            if t and t in chunk_text:
+                chunk_positions.append(p)
+        chunks.append(Document(
+            page_content=chunk_text,
+            metadata={
+                "knowledge_id": knowledge_id,
+                "source_file": filename,
+                "page_num": 1,
+                "chunk_index": idx,
+                "positions": chunk_positions,
+                "bbox": [],  # 文本视图通常不需要像素坐标
+                "document_name": filename,
+                "document_type": "文本",
+                "keywords": extract_keywords_from_content(chunk_text),
+            }
+        ))
+
+    return chunks
+    try:
+        wb = load_workbook(src_path, data_only=True)
+        for ws in wb.worksheets:
+            # 横向打印 + 宽度适配
+            ws.page_setup.orientation = 'landscape'
+            ws.page_setup.fitToWidth = 1
+            ws.page_setup.fitToHeight = 0
+            if ws.sheet_properties.pageSetUpPr is None:
+                ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+            else:
+                ws.sheet_properties.pageSetUpPr.fitToPage = True
+            # 居中与边距
+            ws.print_options.horizontalCentered = True
+            ws.page_margins.left = 0.5
+            ws.page_margins.right = 0.5
+            ws.page_margins.top = 0.6
+            ws.page_margins.bottom = 0.6
+            # 打印区域覆盖已用范围
+            try:
+                dim = ws.calculate_dimension()  # 如 'A1:G200'
+                ws.print_area = dim
+            except Exception:
+                pass
+        fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
+        os.close(fd)
+        wb.save(tmp_path)
+        return tmp_path
+    except Exception as e:
+        logger.warning(f"Excel预处理失败，使用原文件转换: {e}")
+        return None
+
 @app.post("/api/ldap/validate", response_model=LdapValidateResponse)
 def validate_ldap_user(request: LdapValidateRequest):
     """LDAP用户验证（模拟实现）"""
@@ -229,106 +532,137 @@ def validate_ldap_user(request: LdapValidateRequest):
             message="用户名或密码错误"
         )
 
-def process_document_unified(file_path: str, filename: str, knowledge_id: int) -> Dict:
+def process_document_unified(
+    file_path: str,
+    filename: str,
+    knowledge_id: int,
+    knowledge_name: Optional[str] = None,
+    description: Optional[str] = None,
+    tags: Optional[str] = None,
+    effective_time: Optional[str] = None,
+) -> Dict:
     """
-    统一处理文档，直接使用PyMuPDF的块级位置信息
+    统一处理文档：
+    - 非PDF先转换为PDF（优先使用LibreOffice），不改动原始文件
+    - 基于PDF用PyMuPDF提取块级坐标并分块
     """
     try:
-        # 打开文档
-        if filename.lower().endswith('.pdf'):
-            doc = fitz.open(file_path)
-            try:
-                logger.info(f"成功打开文档，页数: {len(doc)}")
-                
-                # 直接使用PyMuPDF的块级位置信息
-                documents = extract_documents_with_block_positions(doc, filename)
-                
-                # 合并所有文档内容，准备用LangChain分割
-                all_content = ""
-                all_positions = []
-                
-                for doc_info in documents:
-                    all_content += doc_info["content"] + "\n"
-                    all_positions.extend(doc_info["positions"])
-                
-                logger.info(f"合并后总内容长度: {len(all_content)} 字符")
-                logger.info(f"合并后总位置信息数量: {len(all_positions)}")
-                
-                # 使用LangChain分割器分割合并后的内容
-                text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=1000,
-                    chunk_overlap=200,
-                    length_function=len,
-                )
-                
-                # 分割文本内容
-                text_chunks = text_splitter.split_text(all_content)
-                logger.info(f"LangChain分割后生成 {len(text_chunks)} 个chunks")
-                
-                # 为每个chunk分配位置信息
-                chunks = []
-                for chunk_idx, chunk_text in enumerate(text_chunks):
-                    # 为每个chunk分配相关的位置信息
-                    chunk_positions = assign_positions_to_chunk(chunk_text, all_positions)
+        # 1) 非PDF → PDF（不改动原始文件，仅生成临时PDF用于定位与回显）
+        ext = Path(filename).suffix.lower()
+        pdf_path_to_open = file_path
+        temp_generated_pdf = None
 
-                    # 计算主页面
-                    page_counts: Dict[int, int] = {}
-                    for p in chunk_positions:
-                        pg = int(p.get('page', 1))
-                        page_counts[pg] = page_counts.get(pg, 0) + 1
-                    main_page = max(page_counts.items(), key=lambda kv: kv[1])[0] if page_counts else 1
-                    
-                    # 创建LangChain Document
-                    chunk = Document(
-                        page_content=chunk_text,
-                        metadata={
-                            "knowledge_id": knowledge_id,
-                            "source_file": filename,
-                            "page_num": main_page,
-                            "chunk_index": chunk_idx,
-                            "positions": chunk_positions,
-                            "bbox": calculate_chunk_bbox(chunk_positions),
-                            "document_name": filename,
-                            "document_type": "文档",
-                            "keywords": extract_keywords_from_content(chunk_text)
-                        }
-                    )
-                    chunks.append(chunk)
-            finally:
-                try:
-                    doc.close()
-                except Exception:
-                    pass
-            
-        else:
-            # 处理其他类型文档
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
+        if ext in {'.xlsx', '.xls'}:
+            # 走Excel原生解析，不转PDF
+            chunks = parse_excel_native(file_path, filename, knowledge_id)
+        elif ext == '.txt':
+            # 走TXT原生解析，不转PDF
+            chunks = parse_txt_native(file_path, filename, knowledge_id)
+        elif ext != '.pdf':
+            # 生成持久化的目标PDF路径（供前端下载/回显用）
+            target_pdf = build_converted_pdf_path(int(knowledge_id) if knowledge_id else 0, filename)
+            try:
+                # 直接输出到目标目录，避免临时文件被删
+                target_dir = os.path.dirname(target_pdf)
+                src_for_convert = file_path
+                # 针对xlsx/xls进行分页优化预处理
+                if ext in {'.xlsx', '.xls'}:
+                    preprocessed = preprocess_xlsx_for_better_pdf(file_path) if ext == '.xlsx' else None
+                    if preprocessed and os.path.exists(preprocessed):
+                        src_for_convert = preprocessed
+                        logger.info(f"Excel预处理完成，使用副本转换: {src_for_convert}")
+
+                pdf_path_to_open = convert_with_libreoffice_safe(src_for_convert, out_dir=target_dir)
+                # 若输出名与期望不一致，复制一份为期望名
+                if os.path.abspath(pdf_path_to_open) != os.path.abspath(target_pdf):
+                    shutil.copyfile(pdf_path_to_open, target_pdf)
+                    pdf_path_to_open = target_pdf
+                logger.info(f"已将 {filename} 转为PDF: {pdf_path_to_open}")
+            except Exception as e:
+                # 对纯文本做降级：直接生成简单PDF到目标路径
+                if ext == '.txt':
+                    pdf_path_to_open = create_simple_pdf_from_txt(file_path, out_path=target_pdf)
+                    logger.info(f"TXT降级转PDF成功: {pdf_path_to_open}")
+                else:
+                    raise
+
+        # 2) 基于PDF走统一解析
+        doc = fitz.open(pdf_path_to_open)
+        try:
+            logger.info(f"成功打开文档，页数: {len(doc)}")
+
+            documents = extract_documents_with_block_positions(doc, filename)
+
+            all_content = ""
+            all_positions = []
+            for doc_info in documents:
+                all_content += doc_info["content"] + "\n"
+                all_positions.extend(doc_info["positions"])
+
+            logger.info(f"合并后总内容长度: {len(all_content)} 字符")
+            logger.info(f"合并后总位置信息数量: {len(all_positions)}")
+
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=1000,
                 chunk_overlap=200,
                 length_function=len,
             )
-            
-            text_chunks = text_splitter.split_text(content)
+
+            text_chunks = text_splitter.split_text(all_content)
+            logger.info(f"LangChain分割后生成 {len(text_chunks)} 个chunks")
+
             chunks = []
-            
             for chunk_idx, chunk_text in enumerate(text_chunks):
+                chunk_positions = assign_positions_to_chunk(chunk_text, all_positions)
+
+                page_counts: Dict[int, int] = {}
+                for p in chunk_positions:
+                    pg = int(p.get('page', 1))
+                    page_counts[pg] = page_counts.get(pg, 0) + 1
+                main_page = max(page_counts.items(), key=lambda kv: kv[1])[0] if page_counts else 1
+
                 chunk = Document(
                     page_content=chunk_text,
                     metadata={
                         "knowledge_id": knowledge_id,
                         "source_file": filename,
-                        "page_num": 1,
+                        "page_num": main_page,
                         "chunk_index": chunk_idx,
+                        "positions": chunk_positions,
+                        "bbox": calculate_chunk_bbox(chunk_positions),
                         "document_name": filename,
                         "document_type": "文档",
-                        "keywords": extract_keywords_from_content(chunk_text)
+                        "keywords": extract_keywords_from_content(chunk_text),
+                        # 协同到ES
+                        "knowledge_name": knowledge_name or "",
+                        "description": description or "",
+                        "tags": tags or "",
+                        "effective_time": effective_time or "",
                     }
                 )
                 chunks.append(chunk)
+        finally:
+            try:
+                doc.close()
+            except Exception:
+                pass
+            # 不删除持久化PDF，供前端下载/回显
         
+        # 为Excel/TXT等原生解析生成的chunk补齐知识元数据字段
+        try:
+            for ch in chunks:
+                md = ch.metadata
+                if "knowledge_name" not in md:
+                    md["knowledge_name"] = knowledge_name or ""
+                if "description" not in md:
+                    md["description"] = description or ""
+                if "tags" not in md:
+                    md["tags"] = tags or ""
+                if "effective_time" not in md:
+                    md["effective_time"] = effective_time or ""
+        except Exception:
+            pass
+
         logger.info(f"最终生成 {len(chunks)} 个chunks")
         
         # 存储到ES
@@ -764,7 +1098,13 @@ async def process_document(
         try:
             # 处理文档
             result = process_document_unified(
-                temp_file_path, file.filename, knowledge_id
+                temp_file_path,
+                file.filename,
+                knowledge_id,
+                knowledge_name=knowledge_name,
+                description=description,
+                tags=tags,
+                effective_time=effective_time,
             )
             
             return DocumentProcessResponse(
@@ -800,19 +1140,37 @@ def chat_with_rag(request: ChatRequest):
             )
         
         # 简化搜索逻辑 - 直接返回语义相似度最高的chunks
+        # 仅检索包含embedding字段的文档，避免脚本在缺失字段时报错
         search_query = {
             "size": 5,  # 返回前5个最相关的chunks
             "query": {
                 "script_score": {
-                    "query": {"match_all": {}},
+                    "query": {
+                        "bool": {
+                            "filter": [
+                                {"exists": {"field": "embedding"}}
+                            ]
+                        }
+                    },
                     "script": {
                         "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
                         "params": {"query_vector": question_embedding}
                     }
                 }
             },
-            "_source": ["content", "metadata", "knowledge_id", "knowledge_name", "source_file", 
-                       "page_num", "chunk_index", "bbox", "positions"]
+            "_source": [
+                "content",
+                "knowledge_id",
+                "knowledge_name",
+                "description",
+                "tags",
+                "effective_time",
+                "source_file",
+                "page_num",
+                "chunk_index",
+                "bbox",
+                "positions"
+            ]
         }
         
         search_response = es_client.search(index=ES_CONFIG['index'], body=search_query)
@@ -835,13 +1193,17 @@ def chat_with_rag(request: ChatRequest):
             chunk_info = {
                 "content": source.get('content', ''),
                 "metadata": {
+                    "knowledge_id": source.get('knowledge_id', 0),
+                    "knowledge_name": source.get('knowledge_name', ''),
+                    "description": source.get('description', ''),
+                    "tags": source.get('tags', ''),
+                    "effective_time": source.get('effective_time', ''),
                     "document_name": source.get('source_file', 'N/A'),
                     "document_type": "文档",  # 通用文档类型
                     "page_num": source.get('page_num', 'N/A'),
                     "chunk_index": source.get('chunk_index', 'N/A'),
                     "bbox": source.get('bbox', []),
                     "positions": source.get('positions', []),
-                    "knowledge_name": source.get('knowledge_name', 'N/A'),
                     "relevance_score": round(score, 3)
                 }
             }
@@ -858,11 +1220,11 @@ def chat_with_rag(request: ChatRequest):
         for chunk in context_chunks:
             metadata = chunk['metadata']
             references.append(KnowledgeReference(
-                knowledge_id=0,  # 这里需要从chunk中获取
+                knowledge_id=int(metadata.get('knowledge_id', 0)) if metadata.get('knowledge_id') is not None else 0,
                 knowledge_name=metadata.get('knowledge_name', ''),
-                description=f"文档: {metadata.get('document_name', '')}",
-                tags=[metadata.get('document_type', '')],
-                effective_time="",
+                description=metadata.get('description', ''),
+                tags=[metadata.get('tags', '')] if isinstance(metadata.get('tags', ''), str) else metadata.get('tags', []),
+                effective_time=metadata.get('effective_time', ''),
                 attachments=[metadata.get('document_name', '')],
                 relevance=metadata.get('relevance_score', 0.0),
                 source_file=metadata.get('document_name', ''),

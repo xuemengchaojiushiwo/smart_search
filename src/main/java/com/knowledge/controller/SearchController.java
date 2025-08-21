@@ -2,7 +2,6 @@ package com.knowledge.controller;
 
 import com.knowledge.dto.SearchRequest;
 import com.knowledge.service.SearchService;
-import com.knowledge.vo.Result;
 import com.knowledge.vo.SearchResultVO;
 import com.knowledge.vo.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;

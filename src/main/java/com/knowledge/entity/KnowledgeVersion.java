@@ -1,12 +1,14 @@
 package com.knowledge.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
-@TableName("knowledge_versions")
+@TableName(value = "knowledge_versions", autoResultMap = true)
 public class KnowledgeVersion {
     
     @TableId(type = IdType.AUTO)
@@ -20,7 +22,8 @@ public class KnowledgeVersion {
     
     private Long categoryId;
     
-    private String tags;
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private List<String> tags;
     
     private LocalDateTime effectiveStartTime;
     

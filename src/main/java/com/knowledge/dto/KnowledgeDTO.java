@@ -18,13 +18,14 @@ public class KnowledgeDTO {
     @NotNull(message = "类目ID不能为空")
     private Long categoryId;
 
-    private String tags;
+    private List<String> tags;
+
+    // 结构化表格数据：{columns:[{name,type}], rows:[...]}
+    private Object tableData;
 
     private LocalDateTime effectiveStartTime;
 
     private LocalDateTime effectiveEndTime;
-
-    private List<AttachmentDTO> attachments;
 
     private String changeReason;
 }

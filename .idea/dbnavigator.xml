@@ -19,7 +19,7 @@
   <component name="DBNavigator.Project.DatabaseBrowserManager">
     <autoscroll-to-editor value="false" />
     <autoscroll-from-editor value="true" />
-    <show-object-properties value="true" />
+    <show-object-properties value="false" />
     <loaded-nodes />
   </component>
   <component name="DBNavigator.Project.DatabaseConsoleManager">
@@ -37,12 +37,16 @@
     <connection id="481828e7-965a-4c31-a31e-46dff73d8aab" />
   </component>
   <component name="DBNavigator.Project.DatasetFilterManager">
+    <filter-actions connection-id="481828e7-965a-4c31-a31e-46dff73d8aab" dataset="knowledge_base.knowledge" active-filter-id="EMPTY_FILTER" />
     <filter-actions connection-id="481828e7-965a-4c31-a31e-46dff73d8aab" dataset="knowledge_base.knowledge_versions" active-filter-id="e867d01d-b5e7-41a5-bc4e-c74742dc4c6b">
       <filter id="e867d01d-b5e7-41a5-bc4e-c74742dc4c6b" name="Filter" temporary="false" custom-name="false" type="basic" join-type="AND" />
     </filter-actions>
   </component>
   <component name="DBNavigator.Project.ExecutionManager">
     <retain-sticky-names value="false" />
+  </component>
+  <component name="DBNavigator.Project.FileConnectionMappingManager">
+    <mapping file-url="file://$PROJECT_DIR$/init_database.sql" connection-id="481828e7-965a-4c31-a31e-46dff73d8aab" session-id="MAIN" current-schema="knowledge_base" />
   </component>
   <component name="DBNavigator.Project.ObjectQuickFilterManager">
     <last-used-operator value="EQUAL" />

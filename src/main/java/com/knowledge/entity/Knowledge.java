@@ -1,12 +1,14 @@
 package com.knowledge.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
-@TableName("knowledge")
+@TableName(value = "knowledge", autoResultMap = true)
 public class Knowledge {
     
     @TableId(type = IdType.AUTO)
@@ -18,7 +20,11 @@ public class Knowledge {
 
     private Long categoryId;
     
-    private String tags;
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private List<String> tags;
+
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private Object tableData; // 结构化表格数据：{columns:[{name,type}], rows:[...]}
     
     private LocalDateTime effectiveStartTime;
     

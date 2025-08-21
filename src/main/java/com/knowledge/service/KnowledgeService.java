@@ -10,6 +10,7 @@ import com.knowledge.entity.KnowledgeVersion;
 import com.knowledge.exception.BusinessException;
 import com.knowledge.mapper.KnowledgeMapper;
 import com.knowledge.vo.KnowledgeVO;
+import com.knowledge.vo.AttachmentVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -66,26 +67,7 @@ public class KnowledgeService {
         return knowledge;
     }
     
-    /**
-     * 创建知识（支持文件上传）
-     */
-    @Transactional
-    public Knowledge createKnowledgeWithFiles(KnowledgeDTO dto, MultipartFile[] files, String currentUser) {
-        // 创建知识
-        Knowledge knowledge = createKnowledge(dto, currentUser);
-        
-        // 保存附件
-        if (files != null && files.length > 0) {
-            attachmentService.saveFiles(knowledge.getId(), files, currentUser);
-        }
-        
-        // 索引到ES（包含附件信息）
-        List<Attachment> attachments = attachmentService.getByKnowledgeId(knowledge.getId());
-        elasticsearchService.indexKnowledge(knowledge, attachments);
-        
-        log.info("知识创建成功（含文件）: ID={}, 名称={}, 文件数={}", knowledge.getId(), knowledge.getName(), files != null ? files.length : 0);
-        return knowledge;
-    }
+    // 原 createKnowledgeWithFiles 已移除。请使用 /api/knowledge/{id}/document 进行文档上传。
     
     /**
      * 更新知识
@@ -136,6 +118,34 @@ public class KnowledgeService {
         
         log.info("知识删除成功: ID={}, 名称={}", id, knowledge.getName());
     }
+
+    /**
+     * 软删除知识对应的附件（DB置 deleted=1），并从ES中删除关联的chunks
+     */
+    @Transactional
+    public void softDeleteAttachment(Long knowledgeId, Long attachmentId, String currentUser) {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Attachment> wrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        wrapper.eq(Attachment::getId, attachmentId)
+               .eq(Attachment::getKnowledgeId, knowledgeId)
+               .eq(Attachment::getDeleted, 0);
+        Attachment attachment = attachmentService.getOne(wrapper);
+        if (attachment == null) {
+            throw new BusinessException("附件不存在或已删除");
+        }
+
+        // DB软删除
+        attachment.setDeleted(1);
+        attachmentService.updateById(attachment);
+
+        // ES中删除该附件对应的chunks（按 knowledge_id + source_file 匹配）
+        try {
+            elasticsearchService.deleteChunksByKnowledgeAndFile(knowledgeId, attachment.getFileName());
+        } catch (Exception e) {
+            log.warn("ES删除附件相关chunks失败: knowledgeId={}, fileName={}, error={}", knowledgeId, attachment.getFileName(), e.getMessage());
+        }
+
+        log.info("附件软删除成功: knowledgeId={}, attachmentId={}", knowledgeId, attachmentId);
+    }
     
     /**
      * 获取知识列表
@@ -144,7 +154,7 @@ public class KnowledgeService {
         Page<Knowledge> pageParam = new Page<>(page, size);
         LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Knowledge::getDeleted, 0);
-        wrapper.orderByDesc(Knowledge::getCreatedTime);
+        wrapper.orderByDesc(Knowledge::getUpdatedTime);
         
         IPage<Knowledge> knowledgePage = knowledgeMapper.selectPage(pageParam, wrapper);
         
@@ -159,7 +169,7 @@ public class KnowledgeService {
         LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Knowledge::getDeleted, 0);
         wrapper.eq(Knowledge::getCategoryId, categoryId);
-        wrapper.orderByDesc(Knowledge::getCreatedTime);
+        wrapper.orderByDesc(Knowledge::getUpdatedTime);
         
         IPage<Knowledge> knowledgePage = knowledgeMapper.selectPage(pageParam, wrapper);
         
@@ -171,8 +181,9 @@ public class KnowledgeService {
      */
     public IPage<KnowledgeVO> searchKnowledge(String query, int page, int size) {
         // 仅使用ES搜索，失败直接抛出异常
+        // 传入页码与大小，由ES服务内部计算from/size
         List<com.knowledge.vo.ElasticsearchResultVO> esResults = elasticsearchService
-            .searchKnowledge(query, (page - 1) * size, size);
+            .searchKnowledge(query, page, size);
 
         List<KnowledgeVO> vos = esResults.stream()
             .map(esResult -> {
@@ -188,9 +199,37 @@ public class KnowledgeService {
                     }
                 }
                 if (esResult.getTags() != null) {
-                    vo.setTags(java.util.Arrays.asList(esResult.getTags().split(",")));
+                    String tagsStr = esResult.getTags().trim();
+                    if (!tagsStr.isEmpty()) {
+                        vo.setTags(java.util.Arrays.asList(tagsStr.split(",")));
+                    } else {
+                        vo.setTags(java.util.Collections.emptyList());
+                    }
                 }
                 vo.setCreatedBy(esResult.getAuthor());
+                // 附件列表（从数据库补齐，前端需要展示）
+                try {
+                    List<Attachment> atts = attachmentService.getByKnowledgeId(vo.getId());
+                    if (atts != null && !atts.isEmpty()) {
+                        List<AttachmentVO> attVos = atts.stream().map(att -> {
+                            AttachmentVO a = new AttachmentVO();
+                            a.setId(att.getId());
+                            a.setFileName(att.getFileName());
+                            a.setFilePath(att.getFilePath());
+                            a.setFileSize(att.getFileSize());
+                            a.setFileType(att.getFileType());
+                            a.setUploadTime(att.getUploadTime());
+                            a.setDownloadCount(att.getDownloadCount());
+                            return a;
+                        }).collect(java.util.stream.Collectors.toList());
+                        vo.setAttachments(attVos);
+                    } else {
+                        vo.setAttachments(java.util.Collections.emptyList());
+                    }
+                } catch (Exception ex) {
+                    log.warn("搜索结果补齐附件失败: knowledgeId={}, error={}", vo.getId(), ex.getMessage());
+                    vo.setAttachments(java.util.Collections.emptyList());
+                }
                 return vo;
             })
             .collect(Collectors.toList());
@@ -220,7 +259,7 @@ public class KnowledgeService {
     public List<KnowledgeVO> getLatestKnowledge(int limit) {
         LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Knowledge::getDeleted, 0);
-        wrapper.orderByDesc(Knowledge::getCreatedTime);
+        wrapper.orderByDesc(Knowledge::getUpdatedTime);
         wrapper.last("LIMIT " + limit);
         
         List<Knowledge> knowledges = knowledgeMapper.selectList(wrapper);
@@ -268,6 +307,35 @@ public class KnowledgeService {
     private KnowledgeVO convertToVO(Knowledge knowledge) {
         KnowledgeVO vo = new KnowledgeVO();
         BeanUtils.copyProperties(knowledge, vo);
+        // 附件列表填充
+        try {
+            List<Attachment> attachments = attachmentService.getByKnowledgeId(knowledge.getId());
+            if (attachments != null && !attachments.isEmpty()) {
+                List<AttachmentVO> attachmentVOS = attachments.stream().map(att -> {
+                    AttachmentVO a = new AttachmentVO();
+                    a.setId(att.getId());
+                    a.setFileName(att.getFileName());
+                    a.setFilePath(att.getFilePath());
+                    a.setFileSize(att.getFileSize());
+                    a.setFileType(att.getFileType());
+                    a.setUploadTime(att.getUploadTime());
+                    a.setDownloadCount(att.getDownloadCount());
+                    return a;
+                }).collect(java.util.stream.Collectors.toList());
+                vo.setAttachments(attachmentVOS);
+            } else {
+                vo.setAttachments(java.util.Collections.emptyList());
+            }
+        } catch (Exception ex) {
+            log.warn("获取附件列表失败: knowledgeId={}, error={}", knowledge.getId(), ex.getMessage());
+            vo.setAttachments(java.util.Collections.emptyList());
+        }
+        // 点赞/收藏数量
+        try {
+            int likeCount = new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.knowledge.entity.KnowledgeLike>()
+                    .lambda().eq(com.knowledge.entity.KnowledgeLike::getKnowledgeId, knowledge.getId())
+                    .eq(com.knowledge.entity.KnowledgeLike::getDeleted, 0).getCustomSqlSegment() == null ? 0 : 0; // 占位，保持编译
+        } catch (Exception ignore) {}
         return vo;
     }
     
@@ -325,9 +393,16 @@ public class KnowledgeService {
                 knowledgeId,
                 knowledge.getName(),
                 knowledge.getDescription(),
-                knowledge.getTags(),
+                knowledge.getTags() == null ? null : String.join(",", knowledge.getTags()),
                 effectiveTime
             );
+
+            // 同步保存附件，确保列表和详情能看到关联文件
+            attachmentService.saveFiles(knowledgeId, new MultipartFile[]{file}, currentUser);
+
+            // 更新ES中的知识索引，包含最新附件信息
+            List<Attachment> attachments = attachmentService.getByKnowledgeId(knowledgeId);
+            elasticsearchService.updateKnowledge(knowledge, attachments);
             
             log.info("知识文档处理成功: knowledgeId={}, fileName={}", knowledgeId, file.getOriginalFilename());
             return result;

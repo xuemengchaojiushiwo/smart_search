@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS knowledge (
     description TEXT COMMENT '文字描述',
     category_id BIGINT NOT NULL COMMENT '三级类目ID',
     tags JSON COMMENT '标签列表',
+    table_data JSON COMMENT '结构化表格数据(JSON): {columns:[{name,type}],rows:[...]}',
     effective_start_time DATETIME COMMENT '生效开始时间',
     effective_end_time DATETIME COMMENT '生效结束时间',
     status TINYINT DEFAULT 1 COMMENT '状态：1-生效，0-失效',
@@ -96,6 +97,38 @@ CREATE TABLE IF NOT EXISTS attachments (
     upload_time DATETIME NOT NULL COMMENT '上传时间',
     download_count INT DEFAULT 0 COMMENT '下载次数',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 点赞表
+CREATE TABLE IF NOT EXISTS knowledge_likes (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    knowledge_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    created_time DATETIME NOT NULL DEFAULT NOW(),
+    deleted TINYINT DEFAULT 0,
+    INDEX idx_kl_kid (knowledge_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 收藏表
+CREATE TABLE IF NOT EXISTS knowledge_favorites (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    knowledge_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    created_time DATETIME NOT NULL DEFAULT NOW(),
+    deleted TINYINT DEFAULT 0,
+    INDEX idx_kf_kid (knowledge_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 反馈表
+CREATE TABLE IF NOT EXISTS knowledge_feedbacks (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    knowledge_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    type VARCHAR(50),
+    content TEXT,
+    created_time DATETIME NOT NULL DEFAULT NOW(),
+    deleted TINYINT DEFAULT 0,
+    INDEX idx_kfb_kid (knowledge_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 搜索历史表

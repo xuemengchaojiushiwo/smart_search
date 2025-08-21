@@ -39,4 +39,6 @@ public class KnowledgeVO {
     private Integer downloadCount;
 
     private List<AttachmentVO> attachments;
+
+    private Object tableData;
 }

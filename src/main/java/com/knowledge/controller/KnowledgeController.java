@@ -37,46 +37,7 @@ public class KnowledgeController {
         return ApiResponse.success("创建知识成功", knowledge);
     }
     
-    @PostMapping("/create")
-    @Operation(summary = "创建知识（支持文件上传）", description = "创建新的知识条目，支持同时上传附件文件")
-    public ApiResponse<Knowledge> createKnowledgeWithFileUpload(
-            @Parameter(description = "知识名称", required = true) @RequestParam("name") String name,
-            @Parameter(description = "知识描述") @RequestParam(value = "description", required = false) String description,
-            @Parameter(description = "类目ID", required = true) @RequestParam("categoryId") Long categoryId,
-            @Parameter(description = "标签（逗号分隔）") @RequestParam(value = "tags", required = false) String tags,
-            @Parameter(description = "生效开始时间") @RequestParam(value = "effectiveStartTime", required = false) String effectiveStartTime,
-            @Parameter(description = "生效结束时间") @RequestParam(value = "effectiveEndTime", required = false) String effectiveEndTime,
-            @Parameter(description = "变更原因") @RequestParam(value = "changeReason", required = false) String changeReason,
-            @Parameter(description = "附件文件列表") @RequestParam(value = "files", required = false) MultipartFile[] files) {
-        
-        KnowledgeDTO dto = new KnowledgeDTO();
-        dto.setName(name);
-        dto.setDescription(description);
-        dto.setCategoryId(categoryId);
-        // 处理标签
-        if (tags != null && !tags.trim().isEmpty()) {
-            dto.setTags(java.util.Arrays.asList(tags.split(",")));
-        }
-        // 处理时间
-        if (effectiveStartTime != null && !effectiveStartTime.trim().isEmpty()) {
-            try {
-                dto.setEffectiveStartTime(java.time.LocalDateTime.parse(effectiveStartTime));
-            } catch (Exception e) {
-                log.warn("解析生效开始时间失败: {}", effectiveStartTime);
-            }
-        }
-        if (effectiveEndTime != null && !effectiveEndTime.trim().isEmpty()) {
-            try {
-                dto.setEffectiveEndTime(java.time.LocalDateTime.parse(effectiveEndTime));
-            } catch (Exception e) {
-                log.warn("解析生效结束时间失败: {}", effectiveEndTime);
-            }
-        }
-        dto.setChangeReason(changeReason);
-        
-        Knowledge knowledge = knowledgeService.createKnowledgeWithFiles(dto, files, "admin");
-        return ApiResponse.success("创建知识成功", knowledge);
-    }
+    
     
     @PutMapping("/{id}")
     @Operation(summary = "更新知识", description = "根据ID更新知识信息")
@@ -92,6 +53,15 @@ public class KnowledgeController {
     public ApiResponse<Void> deleteKnowledge(
             @Parameter(description = "知识ID", required = true, example = "1") @PathVariable Long id) {
         knowledgeService.deleteKnowledge(id, "admin");
+        return ApiResponse.success(null);
+    }
+
+    @DeleteMapping("/{id}/document/{attachmentId}")
+    @Operation(summary = "删除知识文档（软删除）", description = "软删除知识对应的文档记录，并从ES中删除对应chunks/引用")
+    public ApiResponse<Void> softDeleteKnowledgeDocument(
+            @Parameter(description = "知识ID", required = true) @PathVariable Long id,
+            @Parameter(description = "附件ID", required = true) @PathVariable Long attachmentId) {
+        knowledgeService.softDeleteAttachment(id, attachmentId, "admin");
         return ApiResponse.success(null);
     }
     

@@ -2,16 +2,17 @@ package com.knowledge.vo;
 
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class RagResultVO {
 
-    private String id;
+    // 一次RAG对话的完整回答
+    private String answer;
 
-    private String knowledgeId;
+    // 与流式对话一致的引用信息
+    private List<ChatResponse.KnowledgeReference> references;
 
-    private String content;
-
-    private Float score;
-
-    private String source;
+    // 推荐的后续提问（2条）
+    private List<String> recommendedQuestions;
 }
