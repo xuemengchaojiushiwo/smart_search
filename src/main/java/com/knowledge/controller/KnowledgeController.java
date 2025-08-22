@@ -91,7 +91,8 @@ public class KnowledgeController {
         result.put("id", knowledge.getId());
         result.put("name", knowledge.getName());
         result.put("description", knowledge.getDescription());
-        result.put("categoryId", knowledge.getCategoryId());
+        result.put("parentId", knowledge.getParentId());
+        result.put("nodeType", knowledge.getNodeType());
         result.put("tags", knowledge.getTags());
         result.put("effectiveStartTime", knowledge.getEffectiveStartTime());
         result.put("effectiveEndTime", knowledge.getEffectiveEndTime());
@@ -116,14 +117,25 @@ public class KnowledgeController {
         return ApiResponse.success("获取知识列表成功", result);
     }
     
-    @GetMapping("/category/{categoryId}")
-    @Operation(summary = "根据类目获取知识", description = "根据类目ID分页获取知识列表")
-    public ApiResponse<IPage<KnowledgeVO>> getKnowledgeByCategory(
-            @Parameter(description = "类目ID", required = true, example = "1") @PathVariable Long categoryId,
+    @GetMapping("/{parentId}/children")
+    @Operation(summary = "获取子知识", description = "根据父知识ID分页获取直接子节点，parentId传null或0获取根节点")
+    public ApiResponse<IPage<KnowledgeVO>> getChildren(
+            @Parameter(description = "父知识ID", required = true, example = "1") @PathVariable Long parentId,
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size) {
-        IPage<KnowledgeVO> result = knowledgeService.getKnowledgeByCategory(categoryId, page, size);
-        return ApiResponse.success("获取类目知识成功", result);
+        IPage<KnowledgeVO> result = knowledgeService.getChildren(parentId == 0 ? null : parentId, page, size);
+        return ApiResponse.success("获取子知识成功", result);
+    }
+
+    // 兼容旧接口：按类目获取知识 => 等价于获取父知识下子节点
+    @GetMapping("/category/{categoryId}")
+    @Operation(summary = "[兼容] 根据类目获取知识", description = "兼容旧接口：等价于 /api/knowledge/{parentId}/children")
+    public ApiResponse<IPage<KnowledgeVO>> getKnowledgeByCategoryCompat(
+            @Parameter(description = "父知识ID(原类目ID)", required = true, example = "1") @PathVariable Long categoryId,
+            @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
+            @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size) {
+        IPage<KnowledgeVO> result = knowledgeService.getChildren(categoryId == 0 ? null : categoryId, page, size);
+        return ApiResponse.success("获取子知识成功", result);
     }
     
     @GetMapping("/popular")

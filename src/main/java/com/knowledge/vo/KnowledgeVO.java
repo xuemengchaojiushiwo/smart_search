@@ -14,9 +14,12 @@ public class KnowledgeVO {
 
     private String description;
 
+    // 兼容字段：等同于 parentId
     private Long categoryId;
 
-    private String categoryName;
+    private Long parentId;
+
+    private String nodeType;
 
     private List<String> tags;
 

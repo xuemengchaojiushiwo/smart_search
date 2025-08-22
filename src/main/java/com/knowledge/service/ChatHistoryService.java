@@ -61,12 +61,12 @@ public class ChatHistoryService {
         return list;
     }
 
-	public void appendUserMessage(String sessionId, String content, long timestampMs) {
-		appendMessage(sessionId, "user", content, null, timestampMs);
+	public String appendUserMessage(String sessionId, String content, long timestampMs) {
+		return appendMessage(sessionId, "user", content, null, timestampMs);
 	}
 
-	public void appendAssistantMessage(String sessionId, String content, List<Map<String, Object>> references, long timestampMs) {
-		appendMessage(sessionId, "assistant", content, references, timestampMs);
+	public String appendAssistantMessage(String sessionId, String content, List<Map<String, Object>> references, long timestampMs) {
+		return appendMessage(sessionId, "assistant", content, references, timestampMs);
 	}
 
 	public List<ChatMessageVO> getMessages(String sessionId, Integer limit, Long beforeTimestampMs) {
@@ -89,10 +89,11 @@ public class ChatHistoryService {
 		return filtered;
 	}
 
-	private void appendMessage(String sessionId, String role, String content, List<Map<String, Object>> references, long timestampMs) {
+	private String appendMessage(String sessionId, String role, String content, List<Map<String, Object>> references, long timestampMs) {
 		List<ChatMessageVO> list = sessionIdToMessages.computeIfAbsent(sessionId, k -> new ArrayList<>());
 		ChatMessageVO vo = new ChatMessageVO();
-		vo.setId(UUID.randomUUID().toString());
+		String id = UUID.randomUUID().toString();
+		vo.setId(id);
 		vo.setSessionId(sessionId);
 		vo.setRole(role);
 		vo.setContent(content);
@@ -104,6 +105,7 @@ public class ChatHistoryService {
 			session.setMessageCount((session.getMessageCount() == null ? 0 : session.getMessageCount()) + 1);
 			session.setLastActiveTime(java.time.LocalDateTime.now());
 		}
+		return id;
 	}
 }
 

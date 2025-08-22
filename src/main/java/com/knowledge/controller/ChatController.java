@@ -2,10 +2,7 @@ package com.knowledge.controller;
 
 import com.knowledge.dto.ChatRequest;
 import com.alibaba.fastjson2.JSON;
-import com.knowledge.dto.CreateSessionRequest;
 import com.knowledge.service.PythonService;
-import com.knowledge.util.JwtTokenProvider;
-import com.knowledge.vo.ChatResponse;
 import com.knowledge.vo.ChatSessionVO;
 import com.knowledge.vo.ChatMessageVO;
 import com.knowledge.vo.ApiResponse;
@@ -25,7 +22,6 @@ import java.io.PrintWriter;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import java.util.HashMap;
 import java.util.ArrayList;
 
@@ -38,14 +34,17 @@ public class ChatController {
     @Autowired
     private PythonService pythonService;
     
-    @Autowired
-    private JwtTokenProvider jwtTokenProvider;
+//    @Autowired
+//    private JwtTokenProvider jwtTokenProvider;
 
     @Autowired
     private com.knowledge.service.ChatHistoryService chatHistoryService;
 
     @Autowired
     private com.knowledge.service.AttachmentService attachmentService;
+
+    @Autowired
+    private com.knowledge.service.ChatPersistenceService chatPersistenceService;
     
 //     /**
 //      * 创建RAG对话会话
@@ -94,7 +93,28 @@ public class ChatController {
             HttpServletRequest httpRequest) {
 
         try {
-            String username = (userId != null && !userId.isEmpty()) ? userId : extractUsername(httpRequest);
+            String username = resolveUserId(httpRequest, userId);
+            // 优先从DB读取
+            try {
+                List<com.knowledge.entity.ChatSession> dbSessions = chatPersistenceService.listSessions(username);
+                if (dbSessions != null && !dbSessions.isEmpty()) {
+                    List<ChatSessionVO> vos = new java.util.ArrayList<>();
+                    for (com.knowledge.entity.ChatSession s : dbSessions) {
+                        ChatSessionVO vo = new ChatSessionVO();
+                        vo.setSessionId(s.getSessionId());
+                        vo.setSessionName(s.getSessionName());
+                        vo.setCreatedBy(s.getCreatedBy());
+                        vo.setStatus(s.getStatus());
+                        vo.setMessageCount(s.getMessageCount());
+                        vo.setCreatedTime(s.getCreatedTime());
+                        vo.setLastActiveTime(s.getLastActiveTime());
+                        vos.add(vo);
+                    }
+                    log.info("获取RAG会话列表(DB) - 用户: {}，数量: {}", username, vos.size());
+                    return ApiResponse.success(vos);
+                }
+            } catch (Exception ignore) {}
+            // 兜底：内存
             List<ChatSessionVO> sessions = chatHistoryService.listSessions(username);
             log.info("获取RAG会话列表 - 用户: {}，数量: {}", username, sessions.size());
             return ApiResponse.success(sessions);
@@ -116,8 +136,25 @@ public class ChatController {
             @Parameter(description = "返回该时间戳之前的消息") @RequestParam(required = false, name = "before") Long beforeTimestamp,
             HttpServletRequest httpRequest) {
 
-        String username = extractUsername(httpRequest);
+        String username = resolveUserId(httpRequest, null);
         log.info("获取对话历史 - 用户: {}, 会话: {}", username, sessionId);
+        // 先尝试从DB读取
+        try {
+            com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.knowledge.entity.ChatMessage> page = chatPersistenceService.listMessages(sessionId, limit, beforeTimestamp);
+            List<ChatMessageVO> vos = new java.util.ArrayList<>();
+            for (com.knowledge.entity.ChatMessage m : page.getRecords()) {
+                ChatMessageVO vo = new ChatMessageVO();
+                vo.setId(m.getMessageId());
+                vo.setSessionId(m.getSessionId());
+                vo.setRole(m.getRole());
+                vo.setContent(m.getContent());
+                vo.setTimestamp(m.getTimestampMs());
+                try { if (m.getReferencesJson() != null) vo.setReferences((List<java.util.Map<String,Object>>) com.alibaba.fastjson2.JSON.parse(m.getReferencesJson())); } catch (Exception ignore) {}
+                vos.add(vo);
+            }
+            return ApiResponse.success(vos);
+        } catch (Exception ignore) {}
+        // 兜底走内存
         List<ChatMessageVO> messages = chatHistoryService.getMessages(sessionId, limit, beforeTimestamp);
         return ApiResponse.success(messages);
     }
@@ -236,8 +273,11 @@ public class ChatController {
 
             // 确保创建会话并记录用户问题到历史（createdBy 使用解析出的用户）
             chatHistoryService.createSessionIfAbsent(request.getSessionId(), username);
+            chatPersistenceService.ensureSession(request.getSessionId(), username);
             if (request.getQuestion() != null && !request.getQuestion().trim().isEmpty()) {
-                chatHistoryService.appendUserMessage(request.getSessionId(), request.getQuestion(), System.currentTimeMillis());
+                long ts = System.currentTimeMillis();
+                String userMsgId = chatHistoryService.appendUserMessage(request.getSessionId(), request.getQuestion(), ts);
+                chatPersistenceService.saveMessage(request.getSessionId(), userMsgId, "user", request.getQuestion(), null, ts);
             }
             
             // 发送开始事件
@@ -299,13 +339,19 @@ public class ChatController {
                 writer.flush();
             }
             
-            // 发送结束事件
+            // 记录助手消息与引用到历史并拿到 messageId
+            long ats = System.currentTimeMillis();
+            String messageId = chatHistoryService.appendAssistantMessage(request.getSessionId(), answer != null ? answer : "", references, ats);
+            // 序列化引用为JSON
+            String refsJson = null;
+            try { refsJson = com.alibaba.fastjson2.JSON.toJSONString(references); } catch (Exception ignore) {}
+            chatPersistenceService.saveMessage(request.getSessionId(), messageId, "assistant", answer != null ? answer : "", refsJson, ats);
+
+            // 发送结束事件（携带 messageId，供前端埋点/反馈用）
             writer.write("event: end\n");
-            writer.write("data: {\"message\":\"RAG chat completed\",\"sessionId\":\"" + request.getSessionId() + "\"}\n\n");
+            writer.write("data: {\"message\":\"RAG chat completed\",\"sessionId\":\"" + request.getSessionId() + "\",\"messageId\":\"" + messageId + "\"}\n\n");
             writer.flush();
-            
-            // 记录助手消息与引用到历史
-            chatHistoryService.appendAssistantMessage(request.getSessionId(), answer != null ? answer : "", references, System.currentTimeMillis());
+
 
             // 若会话标题为空，基于第一条用户问题自动生成一个简短标题（简单截断版，后续可接入AI摘要）
             try {
@@ -314,6 +360,7 @@ public class ChatController {
                     if (!q.isEmpty()) {
                         String title = q.length() > 30 ? q.substring(0, 30) + "..." : q;
                         chatHistoryService.setSessionTitleIfAbsent(request.getSessionId(), title);
+                        chatPersistenceService.setSessionTitleIfAbsent(request.getSessionId(), title);
                     }
                 }
             } catch (Exception ignore) {}
@@ -344,13 +391,13 @@ public class ChatController {
     /**
      * 从请求头中提取JWT token
      */
-    private String extractToken(HttpServletRequest request) {
-        String bearerToken = request.getHeader("Authorization");
-        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
-            return bearerToken.substring(7);
-        }
-        throw new RuntimeException("未找到有效的JWT token");
-    }
+//    private String extractToken(HttpServletRequest request) {
+//        String bearerToken = request.getHeader("Authorization");
+//        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
+//            return bearerToken.substring(7);
+//        }
+//        throw new RuntimeException("未找到有效的JWT token");
+//    }
 
     /**
      * 统一解析当前请求的 userId：优先请求体传入的 userId，其次请求头 X-User-Id，最后退回默认用户名

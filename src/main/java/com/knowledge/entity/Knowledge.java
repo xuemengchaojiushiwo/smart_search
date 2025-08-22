@@ -17,8 +17,10 @@ public class Knowledge {
     private String name;
     
     private String description;
+    
+    private Long parentId;
 
-    private Long categoryId;
+    private String nodeType; // folder/doc
     
     @TableField(typeHandler = JacksonTypeHandler.class)
     private List<String> tags;

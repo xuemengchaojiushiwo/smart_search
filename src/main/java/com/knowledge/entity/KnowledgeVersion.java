@@ -20,7 +20,9 @@ public class KnowledgeVersion {
     
     private String description;
     
-    private Long categoryId;
+    private Long parentId;
+
+    private String nodeType;
     
     @TableField(typeHandler = JacksonTypeHandler.class)
     private List<String> tags;

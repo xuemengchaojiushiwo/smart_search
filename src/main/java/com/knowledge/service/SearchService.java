@@ -33,6 +33,12 @@ public class SearchService {
     @Autowired
     private AttachmentService attachmentService;
 
+    @Autowired
+    private ChatHistoryService chatHistoryService;
+
+    @Autowired
+    private ChatPersistenceService chatPersistenceService;
+
     // 搜索知识
     public SearchResultVO searchKnowledge(SearchRequest request, Long userId) {
         // 记录搜索历史
@@ -42,7 +48,7 @@ public class SearchService {
         history.setSearchTime(LocalDateTime.now());
         searchHistoryService.save(history);
 
-        // ES搜索（暂时用数据库搜索代替）
+        // ES搜索（仅知识元数据，不含段落内容）
         IPage<com.knowledge.vo.KnowledgeVO> esResults = knowledgeService.searchKnowledge(
             request.getQuery(), request.getPage(), request.getSize());
 
@@ -62,6 +68,16 @@ public class SearchService {
                 q.endsWith("?") || q.endsWith("？") ||
                 lower.contains("how") || lower.contains("what") || lower.contains("why") || lower.contains("which") || lower.contains("where") || lower.contains("who") || lower.contains("when") ||
                 q.contains("如何") || q.contains("是什么") || q.contains("怎么") || q.contains("多少") || q.contains("为什") || q.contains("哪些") || q.contains("在哪") || q.contains("谁") || q.contains("何时") || q.contains("吗") || q.contains("么");
+        }
+
+        // 为本次搜索创建一个会话并记录用户问题
+        String sessionId = java.util.UUID.randomUUID().toString();
+        chatHistoryService.createSessionIfAbsent(sessionId, String.valueOf(userId));
+        chatPersistenceService.ensureSession(sessionId, String.valueOf(userId));
+        if (!q.isEmpty()) {
+            long uts = System.currentTimeMillis();
+            String msgId = chatHistoryService.appendUserMessage(sessionId, q, uts);
+            chatPersistenceService.saveMessage(sessionId, msgId, "user", q, null, uts);
         }
 
         try {
@@ -153,6 +169,15 @@ public class SearchService {
                 followUps.add("还有哪些相关内容值得进一步了解？");
             }
             ragVo.setRecommendedQuestions(followUps);
+
+            // 记录助手消息，获取 messageId
+            long ats = System.currentTimeMillis();
+            String messageId = chatHistoryService.appendAssistantMessage(sessionId, answer != null ? answer : "", references, ats);
+            String refsJson = null;
+            try { refsJson = com.alibaba.fastjson2.JSON.toJSONString(references); } catch (Exception ignore) {}
+            chatPersistenceService.saveMessage(sessionId, messageId, "assistant", answer != null ? answer : "", refsJson, ats);
+            ragVo.setSessionId(sessionId);
+            ragVo.setMessageId(messageId);
             ragResults.add(ragVo);
         } catch (Exception e) {
             log.warn("RAG检索失败，返回空rag结果: {}", e.getMessage());
@@ -169,6 +194,12 @@ public class SearchService {
                 followUps.add("是否需要我推荐一些相关问题？");
             }
             ragVo.setRecommendedQuestions(followUps);
+            // 也记录一条空的助手消息，确保有可反馈的 messageId
+            long ats = System.currentTimeMillis();
+            String messageId = chatHistoryService.appendAssistantMessage(sessionId, "", null, ats);
+            chatPersistenceService.saveMessage(sessionId, messageId, "assistant", "", null, ats);
+            ragVo.setSessionId(sessionId);
+            ragVo.setMessageId(messageId);
             ragResults.add(ragVo);
         }
 

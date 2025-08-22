@@ -24,7 +24,8 @@ class KnowledgeServiceTest {
         KnowledgeDTO dto = new KnowledgeDTO();
         dto.setName("测试知识");
         dto.setDescription("这是一个测试知识");
-        dto.setCategoryId(6L); // Spring Boot类目
+        dto.setParentId(0L); // 放在根下
+        dto.setNodeType("doc");
         dto.setTags(java.util.Arrays.asList("测试", "Java"));
         
         // 执行测试

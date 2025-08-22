@@ -55,7 +55,8 @@ public class ElasticsearchService {
             document.put("id", knowledge.getId());
             document.put("title", knowledge.getName());
             document.put("content", knowledge.getDescription());
-            document.put("category_id", knowledge.getCategoryId());
+            document.put("parent_id", knowledge.getParentId());
+            document.put("node_type", knowledge.getNodeType());
             document.put("tags", knowledge.getTags());
             if (knowledge.getTableData() != null) {
                 document.put("table_data", knowledge.getTableData());
@@ -127,7 +128,8 @@ public class ElasticsearchService {
             // 基本信息
             document.put("title", knowledge.getName());
             document.put("content", knowledge.getDescription());
-            document.put("category_id", knowledge.getCategoryId());
+            document.put("parent_id", knowledge.getParentId());
+            document.put("node_type", knowledge.getNodeType());
             document.put("tags", knowledge.getTags());
             document.put("author", knowledge.getCreatedBy());
             document.put("status", knowledge.getStatus());
@@ -288,10 +290,10 @@ public class ElasticsearchService {
                 }
                 result.setTitle((String) source.getOrDefault("title", ""));
                 result.setContent((String) source.getOrDefault("content", ""));
-                // 修复category_id类型转换问题
-                Object categoryIdObj = source.get("category_id");
-                if (categoryIdObj != null) {
-                    result.setCategoryId(categoryIdObj.toString());
+                // 回填父子结构
+                Object parentIdObj = source.get("parent_id");
+                if (parentIdObj != null) {
+                    result.setParentId(parentIdObj.toString());
                 }
                 result.setAuthor((String) source.get("author"));
                 result.setScore(hit.getScore());

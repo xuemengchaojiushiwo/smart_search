@@ -15,4 +15,9 @@ public class RagResultVO {
 
     // 推荐的后续提问（2条）
     private List<String> recommendedQuestions;
+
+    // 本次回答所属会话与回答消息ID（用于点赞/点踩）
+    private String sessionId;
+
+    private String messageId;
 }

@@ -16,7 +16,7 @@ public class ElasticsearchResultVO {
 
     private String content;
 
-    private String categoryId;
+    private String parentId;
 
     private String author;
 

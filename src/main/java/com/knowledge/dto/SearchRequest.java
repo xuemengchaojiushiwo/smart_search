@@ -3,7 +3,6 @@ package com.knowledge.dto;
 import lombok.Data;
 
 import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.Min;
 
 @Data
 public class SearchRequest {
@@ -15,7 +14,7 @@ public class SearchRequest {
 
     private Integer size = 10;
 
-    private Long categoryId;
+    private Long parentId;
 
     private String[] tags;
 }

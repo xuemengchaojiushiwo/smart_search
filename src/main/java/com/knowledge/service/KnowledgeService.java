@@ -36,8 +36,7 @@ public class KnowledgeService {
     @Autowired
     private AttachmentService attachmentService;
     
-    @Autowired
-    private CategoryService categoryService;
+    // 类目模块已移除
     
     @Autowired
     private PythonService pythonService;
@@ -80,7 +79,8 @@ public class KnowledgeService {
         }
         
         // 保存版本
-        KnowledgeVersion version = saveVersion(existingKnowledge, "UPDATE", dto.getChangeReason(), currentUser);
+        // 记录版本（目前不使用返回值）
+        saveVersion(existingKnowledge, "UPDATE", dto.getChangeReason(), currentUser);
         
         // 更新知识
         BeanUtils.copyProperties(dto, existingKnowledge);
@@ -162,18 +162,53 @@ public class KnowledgeService {
     }
     
     /**
-     * 根据类目获取知识
+     * 获取某个父知识下的直接子节点
      */
-    public IPage<KnowledgeVO> getKnowledgeByCategory(Long categoryId, int page, int size) {
+    public IPage<KnowledgeVO> getChildren(Long parentId, int page, int size) {
         Page<Knowledge> pageParam = new Page<>(page, size);
         LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Knowledge::getDeleted, 0);
-        wrapper.eq(Knowledge::getCategoryId, categoryId);
+        if (parentId == null) {
+            // 根节点同时兼容 parent_id IS NULL 与 parent_id = 0
+            wrapper.and(w -> w.isNull(Knowledge::getParentId)
+                    .or()
+                    .eq(Knowledge::getParentId, 0L));
+        } else {
+            wrapper.eq(Knowledge::getParentId, parentId);
+        }
+        wrapper.orderByAsc(Knowledge::getNodeType); // folder优先
         wrapper.orderByDesc(Knowledge::getUpdatedTime);
-        
         IPage<Knowledge> knowledgePage = knowledgeMapper.selectPage(pageParam, wrapper);
-        
         return knowledgePage.convert(this::convertToVO);
+    }
+
+    /**
+     * 递归构建知识树（谨慎使用：节点数大时建议分页/懒加载）
+     */
+    public List<com.knowledge.vo.KnowledgeTreeVO> getKnowledgeTree() {
+        LambdaQueryWrapper<Knowledge> rootWrapper = new LambdaQueryWrapper<Knowledge>()
+                .eq(Knowledge::getDeleted, 0)
+                .and(w -> w.isNull(Knowledge::getParentId).or().eq(Knowledge::getParentId, 0L))
+                .orderByAsc(Knowledge::getNodeType)
+                .orderByDesc(Knowledge::getUpdatedTime);
+        List<Knowledge> roots = knowledgeMapper.selectList(rootWrapper);
+        return roots.stream().map(this::toTreeNode).collect(Collectors.toList());
+    }
+
+    private com.knowledge.vo.KnowledgeTreeVO toTreeNode(Knowledge k) {
+        com.knowledge.vo.KnowledgeTreeVO node = new com.knowledge.vo.KnowledgeTreeVO();
+        node.setId(k.getId());
+        node.setName(k.getName());
+        node.setParentId(k.getParentId());
+        node.setNodeType(k.getNodeType());
+        // 无论节点类型，均加载子节点，保证“文档型”节点也能作为容器显示其子项
+        List<Knowledge> children = knowledgeMapper.selectList(new LambdaQueryWrapper<Knowledge>()
+                .eq(Knowledge::getDeleted, 0)
+                .eq(Knowledge::getParentId, k.getId())
+                .orderByAsc(Knowledge::getNodeType)
+                .orderByDesc(Knowledge::getUpdatedTime));
+        node.setChildren(children.isEmpty() ? java.util.Collections.emptyList() : children.stream().map(this::toTreeNode).collect(Collectors.toList()));
+        return node;
     }
     
     /**
@@ -191,13 +226,7 @@ public class KnowledgeService {
                 vo.setId(esResult.getId());
                 vo.setName(esResult.getTitle());
                 vo.setDescription(esResult.getContent());
-                if (esResult.getCategoryId() != null) {
-                    try {
-                        vo.setCategoryId(Long.valueOf(esResult.getCategoryId()));
-                    } catch (NumberFormatException e) {
-                        log.warn("无法转换categoryId: {}", esResult.getCategoryId());
-                    }
-                }
+                // 兼容：移除类目，ES不再返回categoryId
                 if (esResult.getTags() != null) {
                     String tagsStr = esResult.getTags().trim();
                     if (!tagsStr.isEmpty()) {
@@ -307,6 +336,8 @@ public class KnowledgeService {
     private KnowledgeVO convertToVO(Knowledge knowledge) {
         KnowledgeVO vo = new KnowledgeVO();
         BeanUtils.copyProperties(knowledge, vo);
+        // 兼容：categoryId 赋值为 parentId，便于旧前端/测试平滑过渡
+        vo.setCategoryId(knowledge.getParentId());
         // 附件列表填充
         try {
             List<Attachment> attachments = attachmentService.getByKnowledgeId(knowledge.getId());
@@ -331,11 +362,7 @@ public class KnowledgeService {
             vo.setAttachments(java.util.Collections.emptyList());
         }
         // 点赞/收藏数量
-        try {
-            int likeCount = new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.knowledge.entity.KnowledgeLike>()
-                    .lambda().eq(com.knowledge.entity.KnowledgeLike::getKnowledgeId, knowledge.getId())
-                    .eq(com.knowledge.entity.KnowledgeLike::getDeleted, 0).getCustomSqlSegment() == null ? 0 : 0; // 占位，保持编译
-        } catch (Exception ignore) {}
+        // 点赞/收藏数量可在专用接口查询，这里暂不填充
         return vo;
     }
     
