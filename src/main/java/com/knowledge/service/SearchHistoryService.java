@@ -10,7 +10,7 @@ import java.util.List;
 @Service
 public class SearchHistoryService extends ServiceImpl<SearchHistoryMapper, SearchHistory> {
 
-    // 获取热门搜索�?
+    // 获取热门搜索
     public List<String> getHotSearches(int limit) {
         return baseMapper.selectHotSearches(limit);
     }

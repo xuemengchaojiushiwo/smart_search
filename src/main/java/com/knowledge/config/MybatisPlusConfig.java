@@ -21,7 +21,7 @@ public class MybatisPlusConfig {
         return interceptor;
     }
 
-    // 自动填充处理�?
+    // 自动填充处理器
     @Bean
     public MetaObjectHandler metaObjectHandler() {
         return new MetaObjectHandler() {

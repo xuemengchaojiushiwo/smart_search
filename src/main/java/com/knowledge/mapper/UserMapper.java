@@ -9,7 +9,10 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface UserMapper extends BaseMapper<User> {
 
-    // 根据用户名查询用�?
+    // 根据用户名(staffid)查询用户
+    @Select("SELECT * FROM users WHERE staffid = #{staffId} AND deleted = 0")
+    User findByStaffId(@Param("staffId") String staffId);
+
     @Select("SELECT * FROM users WHERE username = #{username} AND deleted = 0")
     User findByUsername(@Param("username") String username);
 

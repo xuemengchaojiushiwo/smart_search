@@ -69,9 +69,9 @@ public class CategoryController {
     }
 
     @GetMapping("/tree")
-    @Operation(summary = "获取类目�?", description = "获取完整的类目树结构")
+    @Operation(summary = "获取类目树", description = "获取完整的类目树结构")
     public ApiResponse<List<CategoryTreeVO>> getCategoryTree() {
-        log.info("获取类目�?");
+        log.info("获取类目树");
         List<CategoryTreeVO> tree = categoryService.getCategoryTree();
         return ApiResponse.success(tree);
     }

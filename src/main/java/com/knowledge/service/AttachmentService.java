@@ -182,4 +182,20 @@ public class AttachmentService extends ServiceImpl<AttachmentMapper, Attachment>
         wrapper.eq(Attachment::getDeleted, 0);
         return list(wrapper);
     }
+
+    /**
+     * 根据知识ID与文件名获取最新一条附件记录
+     */
+    public Attachment findByKnowledgeIdAndFileName(Long knowledgeId, String fileName) {
+        if (knowledgeId == null || fileName == null || fileName.isEmpty()) {
+            return null;
+        }
+        LambdaQueryWrapper<Attachment> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Attachment::getKnowledgeId, knowledgeId)
+                .eq(Attachment::getFileName, fileName)
+                .eq(Attachment::getDeleted, 0)
+                .orderByDesc(Attachment::getUploadTime)
+                .last("LIMIT 1");
+        return getOne(wrapper, false);
+    }
 }

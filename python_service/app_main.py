@@ -48,6 +48,19 @@ except ImportError:
 from elasticsearch import Elasticsearch
 import hashlib
 
+# Office文档解析能力（原生）
+try:
+    from docx import Document as DocxDocument
+    DOCX_AVAILABLE = True
+except Exception:
+    DOCX_AVAILABLE = False
+
+try:
+    from pptx import Presentation as PptxPresentation
+    PPTX_AVAILABLE = True
+except Exception:
+    PPTX_AVAILABLE = False
+
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -275,9 +288,26 @@ def create_simple_pdf_from_txt(src_path: str, out_path: Optional[str] = None) ->
     out_pdf = out_path or tempfile.mktemp(suffix='.pdf')
     os.makedirs(os.path.dirname(out_pdf), exist_ok=True)
     doc = fitz.open()
+    # 解决中文显示为问号：嵌入系统CJK字体（优先微软雅黑 / 宋体 / 黑体）
+    def _register_cjk_font(_doc: fitz.Document) -> str:
+        try:
+            candidates = [
+                r"C:\\Windows\\Fonts\\msyh.ttc",
+                r"C:\\Windows\\Fonts\\msyh.ttf",
+                r"C:\\Windows\\Fonts\\simsun.ttc",
+                r"C:\\Windows\\Fonts\\simhei.ttf",
+            ]
+            for p in candidates:
+                if os.path.exists(p):
+                    _doc.insert_font(fontname="CJK", fontfile=p)
+                    return "CJK"
+        except Exception:
+            pass
+        return "helv"
+    cjk_font = _register_cjk_font(doc)
     page = doc.new_page(width=595, height=842)
     rect = fitz.Rect(40, 50, 555, 800)
-    page.insert_textbox(rect, text[:50000], fontsize=11, fontname="helv", align=0)
+    page.insert_textbox(rect, text[:50000], fontsize=11, fontname=cjk_font, align=0)
     doc.save(out_pdf)
     doc.close()
     return out_pdf
@@ -513,6 +543,230 @@ def parse_txt_native(file_path: str, filename: str, knowledge_id: int) -> List[D
         logger.warning(f"Excel预处理失败，使用原文件转换: {e}")
         return None
 
+# ===== DOCX 原生解析与PDF生成（不依赖外部工具） =====
+def create_simple_pdf_from_docx(src_path: str, out_path: str) -> tuple[str, List[Dict]]:
+    """将DOCX内容简单排版生成PDF，并返回 (pdf_path, paragraph_positions)。
+    每个段落在PDF中的放置矩形作为其bbox，供后续可视化使用。
+    """
+    if not DOCX_AVAILABLE:
+        raise RuntimeError("缺少python-docx，无法原生解析Word。请安装: pip install python-docx")
+
+    docx = DocxDocument(src_path)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    pdf = fitz.open()
+    def _register_cjk_font(_doc: fitz.Document) -> str:
+        try:
+            candidates = [
+                r"C:\\Windows\\Fonts\\msyh.ttc",
+                r"C:\\Windows\\Fonts\\msyh.ttf",
+                r"C:\\Windows\\Fonts\\simsun.ttc",
+                r"C:\\Windows\\Fonts\\simhei.ttf",
+            ]
+            for p in candidates:
+                if os.path.exists(p):
+                    _doc.insert_font(fontname="CJK", fontfile=p)
+                    return "CJK"
+        except Exception:
+            pass
+        return "helv"
+    cjk_font = _register_cjk_font(pdf)
+    page_width, page_height = 595.0, 842.0  # A4 72dpi points
+    margin_left, margin_right, margin_top, margin_bottom = 40.0, 40.0, 50.0, 50.0
+    usable_width = page_width - margin_left - margin_right
+    cursor_y = margin_top
+
+    paragraph_positions: List[Dict] = []
+
+    # 新建第一页
+    page = pdf.new_page(width=page_width, height=page_height)
+
+    def new_page_if_needed(height_needed: float):
+        nonlocal page, cursor_y
+        if cursor_y + height_needed > (page_height - margin_bottom):
+            page = pdf.new_page(width=page_width, height=page_height)
+            cursor_y = margin_top
+
+    def draw_paragraph(text: str):
+        nonlocal cursor_y
+        if not text.strip():
+            cursor_y += 8.0
+            return
+        # 预估高度：用一个较高的矩形，插入后不读取残留，靠换页控制
+        rect = fitz.Rect(margin_left, cursor_y, margin_left + usable_width, cursor_y + 200.0)
+        new_page_if_needed(rect.height)
+        rect = fitz.Rect(margin_left, cursor_y, margin_left + usable_width, cursor_y + 200.0)
+        page.insert_textbox(rect, text, fontsize=11, fontname=cjk_font, align=0)
+        # 粗略估算占用高度：按文本长度估计行数
+        approx_chars_per_line = 90
+        lines = max(1, (len(text) // approx_chars_per_line) + 1)
+        used_h = 14.0 * lines
+        bbox = [rect.x0, rect.y0, rect.x1, rect.y0 + used_h]
+        paragraph_positions.append({"text": text, "bbox": bbox, "page": len(pdf)})
+        cursor_y += used_h + 6.0
+
+    # 段落
+    for p in docx.paragraphs:
+        draw_paragraph(p.text)
+
+    # 表格（将每个单元格作为独立小段落）
+    for table in docx.tables:
+        for row in table.rows:
+            cells_text = [c.text.strip() for c in row.cells]
+            row_text = "\t".join(cells_text)
+            draw_paragraph(row_text)
+
+    pdf.save(out_path)
+    pdf.close()
+    return out_path, paragraph_positions
+
+def parse_docx_native(file_path: str, filename: str, knowledge_id: int) -> List["Document"]:
+    pdf_out = build_converted_pdf_path(int(knowledge_id) if knowledge_id else 0, filename)
+    # 生成用于可视化的简单PDF，并获取段落级positions
+    _, paragraph_positions = create_simple_pdf_from_docx(file_path, pdf_out)
+
+    # 汇总内容
+    all_text = "\n".join([p["text"] for p in paragraph_positions])
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len,
+    )
+    text_chunks = splitter.split_text(all_text)
+
+    chunks: List["Document"] = []
+    for chunk_idx, chunk_text in enumerate(text_chunks):
+        chunk_pos = []
+        for p in paragraph_positions:
+            t = p.get("text") or ""
+            if t and t in chunk_text:
+                cp = dict(p)
+                # 将页号同步为page_num字段
+                cp["page"] = p.get("page", 1)
+                chunk_pos.append(cp)
+        bbox = calculate_chunk_bbox([{"bbox": pp["bbox"]} for pp in chunk_pos]) if chunk_pos else [0, 0, 0, 0]
+        page_counts: Dict[int, int] = {}
+        for pp in chunk_pos:
+            pg = int(pp.get("page", 1))
+            page_counts[pg] = page_counts.get(pg, 0) + 1
+        main_page = max(page_counts.items(), key=lambda kv: kv[1])[0] if page_counts else 1
+        chunks.append(Document(
+            page_content=chunk_text,
+            metadata={
+                "knowledge_id": knowledge_id,
+                "source_file": filename,
+                "page_num": main_page,
+                "chunk_index": chunk_idx,
+                "positions": chunk_pos,
+                "bbox": bbox,
+                "document_name": filename,
+                "document_type": "文档",
+                "keywords": extract_keywords_from_content(chunk_text),
+            }
+        ))
+    return chunks
+
+# ===== PPTX 原生解析与PDF生成（不依赖外部工具） =====
+EMU_PER_INCH = 914400.0
+POINTS_PER_INCH = 72.0
+
+def create_simple_pdf_from_pptx(src_path: str, out_path: str) -> tuple[str, List[Dict]]:
+    if not PPTX_AVAILABLE:
+        raise RuntimeError("缺少python-pptx，无法原生解析PPT。请安装: pip install python-pptx")
+
+    prs = PptxPresentation(src_path)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    pdf = fitz.open()
+    def _register_cjk_font(_doc: fitz.Document) -> str:
+        try:
+            candidates = [
+                r"C:\\Windows\\Fonts\\msyh.ttc",
+                r"C:\\Windows\\Fonts\\msyh.ttf",
+                r"C:\\Windows\\Fonts\\simsun.ttc",
+                r"C:\\Windows\\Fonts\\simhei.ttf",
+            ]
+            for p in candidates:
+                if os.path.exists(p):
+                    _doc.insert_font(fontname="CJK", fontfile=p)
+                    return "CJK"
+        except Exception:
+            pass
+        return "helv"
+    cjk_font = _register_cjk_font(pdf)
+    # python-pptx 的尺寸为 Length 类型，用 int() 取 EMU 值更稳妥
+    slide_w_pts = (int(prs.slide_width) / EMU_PER_INCH) * POINTS_PER_INCH
+    slide_h_pts = (int(prs.slide_height) / EMU_PER_INCH) * POINTS_PER_INCH
+    positions: List[Dict] = []
+
+    for s_idx, slide in enumerate(prs.slides):
+        page = pdf.new_page(width=slide_w_pts, height=slide_h_pts)
+        for shape in slide.shapes:
+            try:
+                if not getattr(shape, "has_text_frame", False):
+                    continue
+                text = "\n".join([p.text for p in shape.text_frame.paragraphs]).strip()
+                if not text:
+                    continue
+                x0 = (int(shape.left) / EMU_PER_INCH) * POINTS_PER_INCH
+                y0 = (int(shape.top) / EMU_PER_INCH) * POINTS_PER_INCH
+                x1 = x0 + (int(shape.width) / EMU_PER_INCH) * POINTS_PER_INCH
+                y1 = y0 + (int(shape.height) / EMU_PER_INCH) * POINTS_PER_INCH
+                rect = fitz.Rect(x0, y0, x1, y1)
+                # 在对应矩形内写入文本
+                page.insert_textbox(rect, text, fontsize=12, fontname=cjk_font, align=0)
+                positions.append({"text": text, "bbox": [x0, y0, x1, y1], "page": s_idx + 1})
+            except Exception:
+                continue
+
+    pdf.save(out_path)
+    pdf.close()
+    return out_path, positions
+
+def parse_pptx_native(file_path: str, filename: str, knowledge_id: int) -> List["Document"]:
+    pdf_out = build_converted_pdf_path(int(knowledge_id) if knowledge_id else 0, filename)
+    _, shape_positions = create_simple_pdf_from_pptx(file_path, pdf_out)
+
+    # 汇总内容
+    all_text = "\n".join([p["text"] for p in shape_positions])
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len,
+    )
+    text_chunks = splitter.split_text(all_text)
+
+    chunks: List["Document"] = []
+    for idx, chunk_text in enumerate(text_chunks):
+        chunk_pos = []
+        for p in shape_positions:
+            t = p.get("text") or ""
+            if t and t in chunk_text:
+                chunk_pos.append(dict(p))
+        bbox = calculate_chunk_bbox([{"bbox": pp["bbox"]} for pp in chunk_pos]) if chunk_pos else [0, 0, 0, 0]
+        page_counts: Dict[int, int] = {}
+        for pp in chunk_pos:
+            pg = int(pp.get("page", 1))
+            page_counts[pg] = page_counts.get(pg, 0) + 1
+        main_page = max(page_counts.items(), key=lambda kv: kv[1])[0] if page_counts else 1
+        chunks.append(Document(
+            page_content=chunk_text,
+            metadata={
+                "knowledge_id": knowledge_id,
+                "source_file": filename,
+                "page_num": main_page,
+                "chunk_index": idx,
+                "positions": chunk_pos,
+                "bbox": bbox,
+                "document_name": filename,
+                "document_type": "演示文稿",
+                "keywords": extract_keywords_from_content(chunk_text),
+            }
+        ))
+    return chunks
+
 @app.post("/api/ldap/validate", response_model=LdapValidateResponse)
 def validate_ldap_user(request: LdapValidateRequest):
     """LDAP用户验证（模拟实现）"""
@@ -553,33 +807,34 @@ def process_document_unified(
         temp_generated_pdf = None
 
         if ext in {'.xlsx', '.xls'}:
-            # 走Excel原生解析，不转PDF
+            # Excel 原生解析
             chunks = parse_excel_native(file_path, filename, knowledge_id)
         elif ext == '.txt':
-            # 走TXT原生解析，不转PDF
+            # TXT 原生解析
             chunks = parse_txt_native(file_path, filename, knowledge_id)
+        elif ext in {'.doc', '.docx'}:
+            # Word 原生解析
+            chunks = parse_docx_native(file_path, filename, knowledge_id)
+            # 使用我们生成的简易PDF供回显
+            target_pdf = build_converted_pdf_path(int(knowledge_id) if knowledge_id else 0, filename)
+            pdf_path_to_open = target_pdf
+        elif ext in {'.ppt', '.pptx'}:
+            # PPT 原生解析
+            chunks = parse_pptx_native(file_path, filename, knowledge_id)
+            target_pdf = build_converted_pdf_path(int(knowledge_id) if knowledge_id else 0, filename)
+            pdf_path_to_open = target_pdf
         elif ext != '.pdf':
-            # 生成持久化的目标PDF路径（供前端下载/回显用）
+            # 其他Office类型仍尝试转为PDF（如需）
             target_pdf = build_converted_pdf_path(int(knowledge_id) if knowledge_id else 0, filename)
             try:
-                # 直接输出到目标目录，避免临时文件被删
                 target_dir = os.path.dirname(target_pdf)
                 src_for_convert = file_path
-                # 针对xlsx/xls进行分页优化预处理
-                if ext in {'.xlsx', '.xls'}:
-                    preprocessed = preprocess_xlsx_for_better_pdf(file_path) if ext == '.xlsx' else None
-                    if preprocessed and os.path.exists(preprocessed):
-                        src_for_convert = preprocessed
-                        logger.info(f"Excel预处理完成，使用副本转换: {src_for_convert}")
-
                 pdf_path_to_open = convert_with_libreoffice_safe(src_for_convert, out_dir=target_dir)
-                # 若输出名与期望不一致，复制一份为期望名
                 if os.path.abspath(pdf_path_to_open) != os.path.abspath(target_pdf):
                     shutil.copyfile(pdf_path_to_open, target_pdf)
                     pdf_path_to_open = target_pdf
                 logger.info(f"已将 {filename} 转为PDF: {pdf_path_to_open}")
             except Exception as e:
-                # 对纯文本做降级：直接生成简单PDF到目标路径
                 if ext == '.txt':
                     pdf_path_to_open = create_simple_pdf_from_txt(file_path, out_path=target_pdf)
                     logger.info(f"TXT降级转PDF成功: {pdf_path_to_open}")

@@ -43,62 +43,62 @@ public class ChatController {
 
     @Autowired
     private com.knowledge.service.ChatHistoryService chatHistoryService;
-    
-    /**
-     * 创建RAG对话会话
-     */
-    @PostMapping("/sessions")
-    @Operation(summary = "创建RAG会话", description = "创建一个新的RAG对话会话")
-    public ApiResponse<ChatSessionVO> createSession(
-            @Parameter(description = "创建会话请求", required = true) @Valid @RequestBody CreateSessionRequest request,
-            HttpServletRequest httpRequest) {
-        
-        try {
-            String username = extractUsername(httpRequest);
-            
-            // 生成会话ID
-            String sessionId = UUID.randomUUID().toString();
-            
-            // 创建会话VO（这里应该调用会话服务）
-            ChatSessionVO session = new ChatSessionVO();
-            session.setSessionId(sessionId);
-            session.setSessionName(request.getSessionName());
-            session.setDescription(request.getDescription());
-            session.setKnowledgeIds(request.getKnowledgeIds());
-            session.setCreatedBy(username);
-            session.setStatus("ACTIVE");
-            
-            log.info("创建RAG会话 - 用户: {}, 会话: {}", username, sessionId);
-            
-            // 初始化会话历史
-            chatHistoryService.createSessionIfAbsent(sessionId, username);
 
-            return ApiResponse.success(session);
-            
-        } catch (Exception e) {
-            log.error("创建会话失败: {}", e.getMessage(), e);
-            return ApiResponse.error("创建会话失败: " + e.getMessage());
-        }
-    }
+    @Autowired
+    private com.knowledge.service.AttachmentService attachmentService;
+    
+//     /**
+//      * 创建RAG对话会话
+//      */
+//     @PostMapping("/sessions")
+//     @Operation(summary = "创建RAG会话", description = "创建一个新的RAG对话会话")
+//     public ApiResponse<ChatSessionVO> createSession(
+//             @Parameter(description = "创建会话请求", required = true) @Valid @RequestBody CreateSessionRequest request,
+//             HttpServletRequest httpRequest) {
+//
+//         try {
+//             String username = extractUsername(httpRequest);
+//
+//             // 生成会话ID
+//             String sessionId = UUID.randomUUID().toString();
+//
+//             // 创建会话VO（这里应该调用会话服务）
+//             ChatSessionVO session = new ChatSessionVO();
+//             session.setSessionId(sessionId);
+//             session.setSessionName(request.getSessionName());
+//             session.setDescription(request.getDescription());
+//             session.setKnowledgeIds(request.getKnowledgeIds());
+//             session.setCreatedBy(username);
+//             session.setStatus("ACTIVE");
+//
+//             log.info("创建RAG会话 - 用户: {}, 会话: {}", username, sessionId);
+//
+//             // 初始化会话历史
+//             chatHistoryService.createSessionIfAbsent(sessionId, username);
+//
+//             return ApiResponse.success(session);
+//
+//         } catch (Exception e) {
+//             log.error("创建会话失败: {}", e.getMessage(), e);
+//             return ApiResponse.error("创建会话失败: " + e.getMessage());
+//         }
+//     }
     
     /**
      * 获取用户RAG会话列表
      */
     @GetMapping("/sessions")
-    @Operation(summary = "获取RAG会话列表", description = "获取当前用户的所有RAG对话会话")
-    public ApiResponse<List<ChatSessionVO>> getSessions(HttpServletRequest httpRequest) {
-        
+    @Operation(summary = "获取RAG会话列表", description = "获取指定用户（或当前用户）的所有RAG对话会话")
+    public ApiResponse<List<ChatSessionVO>> getSessions(
+            @Parameter(description = "用户ID（可选，不传则使用当前请求用户）") @RequestParam(value = "userId", required = false) String userId,
+            HttpServletRequest httpRequest) {
+
         try {
-            String username = extractUsername(httpRequest);
-            
-            // 这里应该调用会话服务获取用户会话列表
-            // 暂时返回空列表
-            List<ChatSessionVO> sessions = new ArrayList<>();
-            
-            log.info("获取RAG会话列表 - 用户: {}", username);
-            
+            String username = (userId != null && !userId.isEmpty()) ? userId : extractUsername(httpRequest);
+            List<ChatSessionVO> sessions = chatHistoryService.listSessions(username);
+            log.info("获取RAG会话列表 - 用户: {}，数量: {}", username, sessions.size());
             return ApiResponse.success(sessions);
-            
+
         } catch (Exception e) {
             log.error("获取会话列表失败: {}", e.getMessage(), e);
             return ApiResponse.error("获取会话列表失败: " + e.getMessage());
@@ -213,7 +213,7 @@ public class ChatController {
             HttpServletResponse response) {
         
         try {
-            String username = extractUsername(httpRequest);
+            String username = resolveUserId(httpRequest, request.getUserId());
             
             // 如果没有sessionId，生成新的
             if (request.getSessionId() == null) {
@@ -229,8 +229,16 @@ public class ChatController {
             response.setHeader("Connection", "keep-alive");
             response.setHeader("Access-Control-Allow-Origin", "*");
             response.setHeader("Access-Control-Allow-Headers", "Cache-Control");
+            // 禁止中间层缓冲，降低分片概率
+            response.setHeader("X-Accel-Buffering", "no");
             
             PrintWriter writer = response.getWriter();
+
+            // 确保创建会话并记录用户问题到历史（createdBy 使用解析出的用户）
+            chatHistoryService.createSessionIfAbsent(request.getSessionId(), username);
+            if (request.getQuestion() != null && !request.getQuestion().trim().isEmpty()) {
+                chatHistoryService.appendUserMessage(request.getSessionId(), request.getQuestion(), System.currentTimeMillis());
+            }
             
             // 发送开始事件
             writer.write("event: start\n");
@@ -249,32 +257,45 @@ public class ChatController {
                 result.put("references", new ArrayList<>());
             }
             
-            // 发送回答内容（模拟流式输出）
+            // 发送回答内容（单次完整 data，避免被分片解析）
             String answer = (String) result.get("answer");
-            if (answer != null) {
-                // 模拟逐字输出
-                String[] words = answer.split(" ");
-                for (int i = 0; i < words.length; i++) {
-                    writer.write("event: message\n");
-                    writer.write("data: {\"content\":\"" + words[i] + " \",\"index\":" + i + "}\n\n");
-                    writer.flush();
-                    
-                    // 模拟延迟
-                    try {
-                        Thread.sleep(100);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
+            if (answer != null && !answer.isEmpty()) {
+                java.util.Map<String, Object> payload = new java.util.HashMap<>();
+                payload.put("content", answer);
+                payload.put("index", 0);
+                writer.write("event: message\n");
+                writer.write("data: " + JSON.toJSONString(payload) + "\n\n");
+                writer.flush();
             }
             
             // 处理知识引用（返回完整引用数组，包含页码与坐标等溯源信息）
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> references = (List<Map<String, Object>>) result.get("references");
             if (references != null) {
+                // 丰富引用：为每条引用补充下载链接 download_url
+                List<Map<String, Object>> enriched = new ArrayList<>();
+                for (Map<String, Object> ref : references) {
+                    Map<String, Object> copy = new java.util.HashMap<>(ref);
+                    try {
+                        Object kidObj = ref.get("knowledge_id");
+                        Object fileObj = ref.get("source_file");
+                        if (kidObj != null && fileObj != null) {
+                            Long kid;
+                            try { kid = Long.valueOf(String.valueOf(kidObj)); } catch (Exception e) { kid = null; }
+                            String fileName = String.valueOf(fileObj);
+                            if (kid != null && fileName != null && !fileName.isEmpty()) {
+                                com.knowledge.entity.Attachment att = attachmentService.findByKnowledgeIdAndFileName(kid, fileName);
+                                if (att != null && att.getId() != null) {
+                                    String downloadUrl = "/api/knowledge/" + kid + "/document/" + att.getId() + "/download";
+                                    copy.put("download_url", downloadUrl);
+                                }
+                            }
+                        }
+                    } catch (Exception ignore) {}
+                    enriched.add(copy);
+                }
                 writer.write("event: references\n");
-                writer.write("data: " + JSON.toJSONString(references) + "\n\n");
+                writer.write("data: " + JSON.toJSONString(enriched) + "\n\n");
                 writer.flush();
             }
             
@@ -316,7 +337,7 @@ public class ChatController {
      * 从请求头中提取用户名（支持JWT token或直接用户名）
      */
     private String extractUsername(HttpServletRequest request) {
-        // 暂时去掉JWT token验证，直接使用默认用户名
+        // 兼容旧逻辑
         return "test_user";
     }
     
@@ -329,5 +350,19 @@ public class ChatController {
             return bearerToken.substring(7);
         }
         throw new RuntimeException("未找到有效的JWT token");
+    }
+
+    /**
+     * 统一解析当前请求的 userId：优先请求体传入的 userId，其次请求头 X-User-Id，最后退回默认用户名
+     */
+    private String resolveUserId(HttpServletRequest request, String bodyUserId) {
+        if (bodyUserId != null && !bodyUserId.isEmpty()) {
+            return bodyUserId;
+        }
+        String headerUser = request.getHeader("X-User-Id");
+        if (headerUser != null && !headerUser.isEmpty()) {
+            return headerUser;
+        }
+        return extractUsername(request);
     }
 }

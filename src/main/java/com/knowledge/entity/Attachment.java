@@ -26,11 +26,11 @@ public class Attachment {
     
     private Integer downloadCount;
     
-    private String fileHash;  // 文件内容hash值，用于检测文件是否变�?
+    private String fileHash;  // 文件内容hash值，用于检测文件是否变化
     
     private Long versionId;   // 关联的知识版本ID
     
-    private Integer versionNumber;  // 版本�?
+    private Integer versionNumber;  // 版本号
 
     @TableLogic
     private Integer deleted;

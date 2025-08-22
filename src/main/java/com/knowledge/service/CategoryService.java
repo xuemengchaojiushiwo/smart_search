@@ -34,7 +34,7 @@ public class CategoryService extends ServiceImpl<CategoryMapper, Category> {
         BeanUtils.copyProperties(dto, category);
         category.setCreatedBy(currentUser);
 
-        // 验证父类目是否存�?
+        // 验证父类目是否存在
         if (dto.getParentId() != null) {
             Category parent = getById(dto.getParentId());
             if (parent == null) {
@@ -65,7 +65,7 @@ public class CategoryService extends ServiceImpl<CategoryMapper, Category> {
     public Category updateCategory(Long id, CategoryDTO dto, String currentUser) {
         Category category = getById(id);
         if (category == null) {
-            throw new BusinessException("类目不存�?");
+            throw new BusinessException("类目不存在");
         }
 
         // 记录变更历史
@@ -91,10 +91,10 @@ public class CategoryService extends ServiceImpl<CategoryMapper, Category> {
     public void deleteCategory(Long id, String currentUser) {
         Category category = getById(id);
         if (category == null) {
-            throw new BusinessException("类目不存�?");
+            throw new BusinessException("类目不存在");
         }
 
-        // 检查是否有子类�?
+        // 检查是否有子类目
         if (baseMapper.countChildrenByParentId(id) > 0) {
             throw new BusinessException("存在子类目，无法删除");
         }
@@ -113,13 +113,13 @@ public class CategoryService extends ServiceImpl<CategoryMapper, Category> {
         removeById(id);
     }
 
-    // 获取类目�?
+    // 获取类目树
     public List<CategoryTreeVO> getCategoryTree() {
         List<Category> allCategories = baseMapper.selectAllCategories();
         return buildCategoryTree(allCategories, null);
     }
 
-    // 构建类目�?
+    // 构建类目树
     private List<CategoryTreeVO> buildCategoryTree(List<Category> allCategories, Long parentId) {
         List<CategoryTreeVO> tree = new ArrayList<>();
 

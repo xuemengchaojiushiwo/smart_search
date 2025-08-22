@@ -36,18 +36,18 @@ public class SearchController {
     @GetMapping("/suggest")
     @Operation(summary = "获取搜索建议", description = "根据输入获取搜索建议")
     public ApiResponse<List<String>> getSuggestions(
-            @Parameter(description = "搜索关键�?", required = true, example = "知识") @RequestParam String q) {
+            @Parameter(description = "搜索关键词", required = true, example = "知识") @RequestParam String q) {
         log.info("获取搜索建议: {}", q);
         List<String> suggestions = searchService.getSearchSuggestions(q);
         return ApiResponse.success(suggestions);
     }
     
     @GetMapping("/recommendations")
-    @Operation(summary = "获取推荐问题", description = "获取推荐的问题列�?")
+    @Operation(summary = "获取推荐问题", description = "获取推荐的问题列表")
     public ApiResponse<List<String>> getRecommendations(
             @Parameter(description = "返回数量", example = "3") @RequestParam(defaultValue = "3") int limit) {
         log.info("获取推荐问题: limit={}", limit);
-        // 暂时写死用户ID�?
+        // 暂时写死用户ID
         List<String> recommendations = searchService.getRecommendations(1L, limit);
         return ApiResponse.success(recommendations);
     }

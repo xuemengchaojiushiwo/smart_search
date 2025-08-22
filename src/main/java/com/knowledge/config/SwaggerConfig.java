@@ -7,8 +7,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * OpenAPI配置�?
- * 提供API文档和调试功�?
+ * OpenAPI配置
+ * 提供API文档和调试功能
  */
 @Configuration
 public class SwaggerConfig {
@@ -17,11 +17,11 @@ public class SwaggerConfig {
     public OpenAPI customOpenAPI() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("知识库管理系�?API")
+                        .title("知识库管理系统 API")
                         .description("知识库管理系统的RESTful API接口文档")
                         .version("1.0.0")
                         .contact(new Contact()
-                                .name("开发团�?")
+                                .name("开发团队")
                                 .url("http://localhost:8080")
                                 .email("dev@example.com")));
     }

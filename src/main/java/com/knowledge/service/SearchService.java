@@ -30,6 +30,9 @@ public class SearchService {
     @Autowired
     private PythonService pythonService;
 
+    @Autowired
+    private AttachmentService attachmentService;
+
     // 搜索知识
     public SearchResultVO searchKnowledge(SearchRequest request, Long userId) {
         // 记录搜索历史
@@ -89,12 +92,7 @@ public class SearchService {
                         kr.setTags(ts.isEmpty() ? java.util.Collections.emptyList() : java.util.Arrays.asList(ts.split(",")));
                     }
                     kr.setEffectiveTime((String) ref.get("effective_time"));
-                    Object attsObj = ref.get("attachments");
-                    if (attsObj instanceof List) {
-                        @SuppressWarnings("unchecked")
-                        List<String> al = (List<String>) attsObj;
-                        kr.setAttachments(al);
-                    }
+                    // 引用仅返回AI实际命中的块，不返回整文档附件列表
                     Object rel = ref.get("relevance");
                     if (rel instanceof Number) { kr.setRelevance(((Number) rel).doubleValue()); }
                     kr.setSourceFile(ref.get("source_file") != null ? String.valueOf(ref.get("source_file")) : null);
@@ -119,6 +117,16 @@ public class SearchService {
                     if (ref.get("char_end") != null) {
                         try { kr.setCharEnd(Integer.valueOf(String.valueOf(ref.get("char_end")))); } catch (Exception ignore) {}
                     }
+                    // 拼接下载链接（若能在DB中找到同名附件）
+                    try {
+                        if (kr.getKnowledgeId() != null && kr.getSourceFile() != null) {
+                            com.knowledge.entity.Attachment att = attachmentService.findByKnowledgeIdAndFileName(kr.getKnowledgeId(), kr.getSourceFile());
+                            if (att != null && att.getId() != null) {
+                                String downloadUrl = "/api/knowledge/" + kr.getKnowledgeId() + "/document/" + att.getId() + "/download";
+                                kr.setDownloadUrl(downloadUrl);
+                            }
+                        }
+                    } catch (Exception ignore) {}
                     mapped.add(kr);
                 }
                 // 仅返回一个引用

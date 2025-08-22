@@ -11,7 +11,7 @@ import java.util.List;
 @Mapper
 public interface SearchHistoryMapper extends BaseMapper<SearchHistory> {
 
-    // 获取热门搜索�?
+    // 获取热门搜索
     @Select("SELECT query, COUNT(*) as count FROM search_history " +
             "WHERE deleted = 0 AND search_time >= DATE_SUB(NOW(), INTERVAL 1 HOUR) " +
             "GROUP BY query ORDER BY count DESC LIMIT #{limit}")

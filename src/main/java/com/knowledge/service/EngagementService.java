@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
 @Slf4j
 @Service
@@ -83,6 +85,33 @@ public class EngagementService {
 		fb.setCreatedTime(LocalDateTime.now());
 		fb.setDeleted(0);
 		feedbackMapper.insert(fb);
+	}
+
+	// 分页查询反馈列表（按知识ID/用户ID可选过滤）
+	public Page<KnowledgeFeedback> listFeedbacks(Integer page, Integer size, Long knowledgeId, Long userId) {
+		int p = (page == null || page < 1) ? 1 : page;
+		int s = (size == null || size < 1) ? 10 : size;
+		Page<KnowledgeFeedback> pg = new Page<>(p, s);
+		QueryWrapper<KnowledgeFeedback> qw = new QueryWrapper<>();
+		qw.eq("deleted", 0);
+		if (knowledgeId != null) {
+			qw.eq("knowledge_id", knowledgeId);
+		}
+		if (userId != null) {
+			qw.eq("user_id", userId);
+		}
+		qw.orderByDesc("created_time");
+		return feedbackMapper.selectPage(pg, qw);
+	}
+
+	// 逻辑删除反馈
+	public void deleteFeedback(Long id) {
+		if (id == null) return;
+		KnowledgeFeedback fb = feedbackMapper.selectById(id);
+		if (fb != null) {
+			fb.setDeleted(1);
+			feedbackMapper.updateById(fb);
+		}
 	}
 
 	public int countLikes(Long knowledgeId) {

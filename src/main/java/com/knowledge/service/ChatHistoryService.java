@@ -25,6 +25,9 @@ public class ChatHistoryService {
             vo.setSessionName(null);
             vo.setCreatedBy(createdBy);
             vo.setStatus("ACTIVE");
+            vo.setMessageCount(0);
+            vo.setCreatedTime(java.time.LocalDateTime.now());
+            vo.setLastActiveTime(java.time.LocalDateTime.now());
             return vo;
         });
     }
@@ -38,6 +41,24 @@ public class ChatHistoryService {
 
     public ChatSessionVO getSession(String sessionId) {
         return sessions.get(sessionId);
+    }
+
+    public List<ChatSessionVO> listSessions(String createdBy) {
+        List<ChatSessionVO> list = new ArrayList<>();
+        for (ChatSessionVO vo : sessions.values()) {
+            if (createdBy == null || createdBy.equals(vo.getCreatedBy())) {
+                list.add(vo);
+            }
+        }
+        list.sort((a, b) -> {
+            java.time.LocalDateTime la = a.getLastActiveTime();
+            java.time.LocalDateTime lb = b.getLastActiveTime();
+            if (la == null && lb == null) return 0;
+            if (la == null) return 1;
+            if (lb == null) return -1;
+            return lb.compareTo(la);
+        });
+        return list;
     }
 
 	public void appendUserMessage(String sessionId, String content, long timestampMs) {
@@ -78,6 +99,11 @@ public class ChatHistoryService {
 		vo.setReferences(references);
 		vo.setTimestamp(timestampMs);
 		list.add(vo);
+		ChatSessionVO session = sessions.get(sessionId);
+		if (session != null) {
+			session.setMessageCount((session.getMessageCount() == null ? 0 : session.getMessageCount()) + 1);
+			session.setLastActiveTime(java.time.LocalDateTime.now());
+		}
 	}
 }
 

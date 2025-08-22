@@ -14,6 +14,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.net.URLEncoder;
 
 import javax.validation.Valid;
 import java.util.HashMap;
@@ -28,6 +35,8 @@ public class KnowledgeController {
     
     @Autowired
     private KnowledgeService knowledgeService;
+    @Autowired
+    private com.knowledge.service.AttachmentService attachmentService;
     
     @PostMapping
     @Operation(summary = "创建知识", description = "创建新的知识条目")
@@ -157,5 +166,39 @@ public class KnowledgeController {
             @Parameter(description = "文档文件列表", required = true) @RequestParam("files") MultipartFile[] files) {
         Map<String, Object> result = knowledgeService.processKnowledgeDocuments(files, id, "admin");
         return ApiResponse.success("文档处理成功", result);
+    }
+
+    @GetMapping("/{knowledgeId}/document/{attachmentId}/download")
+    @Operation(summary = "下载知识文档", description = "根据附件ID下载对应文档")
+    public ResponseEntity<byte[]> downloadAttachment(
+            @Parameter(description = "知识ID", required = true) @PathVariable Long knowledgeId,
+            @Parameter(description = "附件ID", required = true) @PathVariable Long attachmentId) {
+        Attachment att = attachmentService.getById(attachmentId);
+        if (att == null || !att.getKnowledgeId().equals(knowledgeId) || att.getDeleted() != null && att.getDeleted() == 1) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            File file = new File(att.getFilePath());
+            if (!file.exists()) {
+                return ResponseEntity.notFound().build();
+            }
+            byte[] bytes;
+            try (InputStream in = new FileInputStream(file)) {
+                bytes = in.readAllBytes();
+            }
+            // 下载计数+1（忽略并发的轻微不一致）
+            try {
+                att.setDownloadCount(att.getDownloadCount() == null ? 1 : att.getDownloadCount() + 1);
+                attachmentService.updateById(att);
+            } catch (Exception ignore) {}
+            String encoded = URLEncoder.encode(att.getFileName(), "UTF-8").replaceAll("\\+", "%20");
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + encoded + "\"")
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .contentLength(bytes.length)
+                    .body(bytes);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).build();
+        }
     }
 } 

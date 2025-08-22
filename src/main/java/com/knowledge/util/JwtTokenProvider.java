@@ -59,7 +59,7 @@ public class JwtTokenProvider {
         return claims.getSubject();
     }
     
-    // 从Token中获取角�?
+    // 从Token中获取角色
     public String getRoleFromToken(String token) {
         Claims claims = Jwts.parser()
                 .setSigningKey(jwtSecret)

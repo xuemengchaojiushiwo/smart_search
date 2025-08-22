@@ -11,7 +11,7 @@ SET character_set_connection=utf8mb4;
 -- 用户表
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
+    staffid VARCHAR(50) NOT NULL UNIQUE,
     email VARCHAR(100),
     role VARCHAR(20) DEFAULT 'USER',
     status TINYINT DEFAULT 1,
@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS category_change_logs (
 );
 
 -- 插入初始数据
-INSERT INTO users (username, email, role) VALUES 
+INSERT INTO users (staffid, email, role) VALUES 
 ('admin', 'admin@example.com', 'ADMIN'),
 ('user1', 'user1@example.com', 'USER'),
 ('user2', 'user2@example.com', 'USER');

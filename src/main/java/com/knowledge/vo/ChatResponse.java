@@ -19,7 +19,8 @@ public class ChatResponse {
         private String description;
         private List<String> tags;
         private String effectiveTime;
-        private List<String> attachments;
+        // 每个引用对应文档的下载链接（由后端拼接）。不返回整文档附件列表，只返回AI命中的块信息
+        private String downloadUrl;
         private Double relevance;
         // 溯源信息（来自Python RAG返回）
         private String sourceFile;

@@ -21,29 +21,40 @@ public class UserService extends ServiceImpl<UserMapper, User> {
         return baseMapper.findByUsername(username);
     }
 
+    public User findByStaffId(String staffId) {
+        return baseMapper.findByStaffId(staffId);
+    }
+
     public User findByEmail(String email) {
         return baseMapper.findByEmail(email);
     }
 
-    // 验证用户登录（跳过LDAP验证，默认通过�?
+    // 验证用户登录（跳过LDAP验证，默认通过）
     @Transactional
     public User validateUser(String username, String password) {
         try {
             log.info("跳过LDAP验证，默认用户验证通过: {}", username);
 
-            // 查找或创建用�?
-            User user = findByUsername(username);
+            // 先按工号匹配（staffId），找不到再按用户名匹配
+            User user = null;
+            try { user = findByStaffId(username); } catch (Exception ignore) {}
+            if (user == null) {
+                user = findByUsername(username);
+            }
             if (user == null) {
                 // 新用户，创建用户记录
                 user = new User();
                 user.setUsername(username);
+                user.setStaffId(username);
                 user.setEmail(username + "@example.com"); // 默认邮箱
-                user.setRole("USER"); // 默认角色
+                user.setRole("USER"); // 兼容字段
+                user.setSystemRole("USER");
+                user.setStaffRole("WPB");
                 user.setStatus(1);
                 user.setCreatedTime(LocalDateTime.now());
                 user.setUpdatedTime(LocalDateTime.now());
                 save(user);
-                log.info("创建新用�? {}", username);
+                log.info("创建新用户 {}", username);
             } else {
                 // 更新用户信息
                 user.setUpdatedTime(LocalDateTime.now());

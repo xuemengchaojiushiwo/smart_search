@@ -11,9 +11,13 @@ SET character_set_connection=utf8mb4;
 -- 用户表
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    username VARCHAR(50) UNIQUE NOT NULL COMMENT '用户名',
-    email VARCHAR(100) UNIQUE NOT NULL COMMENT '邮箱',
-    role VARCHAR(20) NOT NULL COMMENT '角色',
+    username VARCHAR(100) NULL COMMENT '用户名(ldap返回)',
+    staffid VARCHAR(50) UNIQUE NOT NULL COMMENT '工号',
+    email VARCHAR(100) UNIQUE NULL COMMENT '邮箱',
+    role VARCHAR(20) NULL COMMENT '兼容旧字段',
+    staff_role VARCHAR(50) NULL COMMENT '员工角色(ldap)',
+    system_role VARCHAR(50) NULL COMMENT '系统角色',
+    workspace VARCHAR(200) NULL COMMENT '可管理的workspace(逗号分隔)',
     status TINYINT DEFAULT 1 COMMENT '状态：1-启用，0-禁用',
     created_time DATETIME NOT NULL COMMENT '创建时间',
     updated_time DATETIME COMMENT '更新时间',
@@ -142,7 +146,7 @@ CREATE TABLE IF NOT EXISTS search_history (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 插入测试数据
-INSERT INTO users (username, email, role, status, created_time) VALUES 
+INSERT INTO users (staffid, email, role, status, created_time) VALUES 
 ('admin', 'admin@example.com', 'ADMIN', 1, NOW()),
 ('user1', 'user1@example.com', 'USER', 1, NOW()),
 ('user2', 'user2@example.com', 'USER', 1, NOW());

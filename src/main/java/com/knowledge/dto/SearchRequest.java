@@ -8,7 +8,7 @@ import javax.validation.constraints.Min;
 @Data
 public class SearchRequest {
     
-    @NotBlank(message = "搜索关键词不能为�?")
+    @NotBlank(message = "搜索关键词不能为空")
     private String query;
 
     private Integer page = 1;

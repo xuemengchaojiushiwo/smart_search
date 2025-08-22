@@ -62,10 +62,40 @@ def search_es(knowledge_id: int, source_file: str) -> None:
 
     from elasticsearch import Elasticsearch
 
-    es = Elasticsearch([f"http://{ES_CONFIG['host']}:{ES_CONFIG['port']}"])
+    es = Elasticsearch(
+        [f"http://{ES_CONFIG['host']}:{ES_CONFIG['port']}"] ,
+        basic_auth=(ES_CONFIG.get('username') or None, ES_CONFIG.get('password') or None) if ES_CONFIG.get('username') else None,
+        verify_certs=ES_CONFIG.get('verify_certs', False)
+    )
     index = ES_CONFIG['index']
-    query = {
-        "size": 5,
+    try:
+        es.indices.refresh(index=index)
+    except Exception:
+        pass
+
+    def run_and_print(q, note: str):
+        res = es.search(index=index, body=q)
+        hits = res.get('hits', {}).get('hits', [])
+        print(f"ES 命中条数: {len(hits)} (打印最多5条样例) - {note}")
+        for i, h in enumerate(hits[:5]):
+            src = h['_source']
+            content_preview = (src.get('content') or '')[:60].replace('\n', ' ')
+            positions = src.get('positions') or []
+            print(f"—— 样例 {i+1} ——")
+            print(f"knowledge_id={src.get('knowledge_id')}  knowledge_name={src.get('knowledge_name')}")
+            print(f"source_file={src.get('source_file')}  page_num={src.get('page_num')}  chunk_index={src.get('chunk_index')}")
+            print(f"positions_count={len(positions)}  bbox={(src.get('bbox') or [])}")
+            print(f"content_preview={content_preview}")
+        return len(hits)
+
+    base_source = [
+        "knowledge_id", "knowledge_name", "description", "tags", "effective_time",
+        "source_file", "page_num", "chunk_index", "bbox", "positions", "content"
+    ]
+
+    # 方案1：按 knowledge_id + source_file.keyword 精确匹配
+    query_keyword = {
+        "size": 10,
         "query": {
             "bool": {
                 "must": [
@@ -74,24 +104,37 @@ def search_es(knowledge_id: int, source_file: str) -> None:
                 ]
             }
         },
-        "_source": [
-            "knowledge_id", "knowledge_name", "description", "tags", "effective_time",
-            "source_file", "page_num", "chunk_index", "bbox", "positions", "content"
-        ]
+        "_source": base_source
     }
 
-    res = es.search(index=index, body=query)
-    hits = res.get('hits', {}).get('hits', [])
-    print(f"ES 命中条数: {len(hits)} (打印最多5条样例)")
-    for i, h in enumerate(hits):
-        src = h['_source']
-        content_preview = (src.get('content') or '')[:60].replace('\n', ' ')
-        positions = src.get('positions') or []
-        print(f"—— 样例 {i+1} ——")
-        print(f"knowledge_id={src.get('knowledge_id')}  knowledge_name={src.get('knowledge_name')}")
-        print(f"source_file={src.get('source_file')}  page_num={src.get('page_num')}  chunk_index={src.get('chunk_index')}")
-        print(f"positions_count={len(positions)}  bbox={(src.get('bbox') or [])}")
-        print(f"content_preview={content_preview}")
+    n = run_and_print(query_keyword, "knowledge_id + source_file.keyword")
+    if n > 0:
+        return
+
+    # 方案2：按 knowledge_id + source_file 短语匹配
+    query_phrase = {
+        "size": 10,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"knowledge_id": knowledge_id}},
+                    {"match_phrase": {"source_file": source_file}}
+                ]
+            }
+        },
+        "_source": base_source
+    }
+    n = run_and_print(query_phrase, "knowledge_id + source_file 短语匹配")
+    if n > 0:
+        return
+
+    # 方案3：仅按 knowledge_id（验证是否成功入库）
+    query_kid_only = {
+        "size": 10,
+        "query": {"term": {"knowledge_id": knowledge_id}},
+        "_source": base_source
+    }
+    run_and_print(query_kid_only, "仅 knowledge_id（排查）")
 
 
 def main():

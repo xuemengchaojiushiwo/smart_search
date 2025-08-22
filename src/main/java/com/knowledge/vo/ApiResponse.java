@@ -20,7 +20,7 @@ public class ApiResponse<T> {
     @Schema(description = "响应数据")
     private T data;
 
-    @Schema(description = "时间�?", example = "1640995200000")
+    @Schema(description = "时间戳", example = "1640995200000")
     private Long timestamp;
 
     public ApiResponse() {

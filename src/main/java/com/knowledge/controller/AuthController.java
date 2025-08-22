@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import javax.validation.Valid;
 
 /**
- * 用户认证控制�? */
+ * 用户认证控制器 */
 @Slf4j
 @RestController
 @RequestMapping("/api/auth")
@@ -38,8 +38,9 @@ public class AuthController {
         // 验证用户
         User user = userService.validateUser(request.getUsername(), request.getPassword());
 
-        // 生成token
-        String token = jwtTokenProvider.generateToken(user.getUsername(), user.getRole());
+        // 生成token（优先使用systemRole）
+        String roleForToken = user.getSystemRole() != null ? user.getSystemRole() : user.getRole();
+        String token = jwtTokenProvider.generateToken(user.getUsername(), roleForToken);
 
         // 构建响应
         LoginResponse response = new LoginResponse();
@@ -51,7 +52,7 @@ public class AuthController {
         userVO.setId(user.getId());
         userVO.setUsername(user.getUsername());
         userVO.setEmail(user.getEmail());
-        userVO.setRole(user.getRole());
+        userVO.setRole(roleForToken);
         response.setUser(userVO);
 
         return ApiResponse.success("登录成功", response);

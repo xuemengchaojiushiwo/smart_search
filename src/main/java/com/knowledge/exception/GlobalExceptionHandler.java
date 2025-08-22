@@ -59,6 +59,6 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public Result<String> handleException(Exception e) {
         log.error("系统异常", e);
-        return Result.error("系统异常，请联系管理�?");
+        return Result.error("系统异常，请联系管理员");
     }
 }

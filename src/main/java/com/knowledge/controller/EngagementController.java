@@ -55,6 +55,23 @@ public class EngagementController {
 		engagementService.feedback(knowledgeId, userId, content);
 		return ApiResponse.success(null);
 	}
+
+	@GetMapping("/feedbacks")
+	@Operation(summary = "反馈列表")
+	public ApiResponse<Object> listFeedbacks(
+			@RequestParam(required = false) Integer page,
+			@RequestParam(required = false) Integer size,
+			@RequestParam(required = false) Long knowledgeId,
+			@RequestParam(required = false) Long userId) {
+		return ApiResponse.success(engagementService.listFeedbacks(page, size, knowledgeId, userId));
+	}
+
+	@DeleteMapping("/feedback/{id}")
+	@Operation(summary = "删除反馈")
+	public ApiResponse<Void> deleteFeedback(@PathVariable Long id) {
+		engagementService.deleteFeedback(id);
+		return ApiResponse.success(null);
+	}
 }
 
 
