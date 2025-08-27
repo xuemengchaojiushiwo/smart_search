@@ -23,6 +23,7 @@ import java.io.InputStream;
 import java.net.URLEncoder;
 
 import javax.validation.Valid;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -83,8 +84,24 @@ public class KnowledgeController {
             return ApiResponse.error("知识不存在");
         }
         
-        // 获取附件信息
+        // 获取附件信息并转换为下载URL格式
         List<Attachment> attachments = knowledgeService.getAttachmentsByKnowledgeId(id);
+        List<Map<String, Object>> attachmentVOs = new ArrayList<>();
+        
+        if (attachments != null && !attachments.isEmpty()) {
+            for (Attachment att : attachments) {
+                Map<String, Object> attVO = new HashMap<>();
+                attVO.put("id", att.getId());
+                attVO.put("fileName", att.getFileName());
+                // 将filePath改为下载URL格式，与/api/chat/stream接口保持一致
+                attVO.put("filePath", "/api/knowledge/" + id + "/document/" + att.getId() + "/download");
+                attVO.put("fileSize", att.getFileSize());
+                attVO.put("fileType", att.getFileType());
+                attVO.put("uploadTime", att.getUploadTime());
+                attVO.put("downloadCount", att.getDownloadCount());
+                attachmentVOs.add(attVO);
+            }
+        }
         
         // 构建返回结果
         Map<String, Object> result = new HashMap<>();
@@ -103,7 +120,7 @@ public class KnowledgeController {
         result.put("updatedTime", knowledge.getUpdatedTime());
         result.put("searchCount", knowledge.getSearchCount());
         result.put("downloadCount", knowledge.getDownloadCount());
-        result.put("attachments", attachments);
+        result.put("attachments", attachmentVOs);
         
         return ApiResponse.success("获取知识详情成功", result);
     }

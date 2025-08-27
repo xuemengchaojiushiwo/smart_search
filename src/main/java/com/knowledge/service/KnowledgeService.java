@@ -244,7 +244,8 @@ public class KnowledgeService {
                             AttachmentVO a = new AttachmentVO();
                             a.setId(att.getId());
                             a.setFileName(att.getFileName());
-                            a.setFilePath(att.getFilePath());
+                            // 将filePath改为下载URL格式，与/api/chat/stream接口保持一致
+                            a.setFilePath("/api/knowledge/" + vo.getId() + "/document/" + att.getId() + "/download");
                             a.setFileSize(att.getFileSize());
                             a.setFileType(att.getFileType());
                             a.setUploadTime(att.getUploadTime());
@@ -346,7 +347,8 @@ public class KnowledgeService {
                     AttachmentVO a = new AttachmentVO();
                     a.setId(att.getId());
                     a.setFileName(att.getFileName());
-                    a.setFilePath(att.getFilePath());
+                    // 将filePath改为下载URL格式，与/api/chat/stream接口保持一致
+                    a.setFilePath("/api/knowledge/" + knowledge.getId() + "/document/" + att.getId() + "/download");
                     a.setFileSize(att.getFileSize());
                     a.setFileType(att.getFileType());
                     a.setUploadTime(att.getUploadTime());
