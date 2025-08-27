@@ -51,8 +51,9 @@ public class EngagementController {
 	public ApiResponse<Void> feedback(
 			@PathVariable Long knowledgeId,
 			@Parameter(description = "反馈内容") @RequestParam(required = false) String content,
+			@Parameter(description = "反馈类型(out_of_date|unclear|not_relevant)") @RequestParam(required = false, name = "feedbackType") String feedbackType,
 			@RequestParam(defaultValue = "1") Long userId) {
-		engagementService.feedback(knowledgeId, userId, content);
+		engagementService.feedback(knowledgeId, userId, content, feedbackType);
 		return ApiResponse.success(null);
 	}
 

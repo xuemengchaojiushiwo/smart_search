@@ -25,12 +25,13 @@ public class ChatFeedbackService {
         chatFeedbackMapper.insert(fb);
     }
 
-    public void dislikeAnswer(String sessionId, String messageId, Long userId, String content) {
+    public void dislikeAnswer(String sessionId, String messageId, Long userId, String content, String feedbackType) {
         ChatFeedback fb = new ChatFeedback();
         fb.setSessionId(sessionId);
         fb.setMessageId(messageId);
         fb.setUserId(userId);
         fb.setAttitude("dislike");
+        fb.setFeedbackType(feedbackType);
         fb.setContent(content);
         fb.setCreatedTime(LocalDateTime.now());
         fb.setDeleted(0);

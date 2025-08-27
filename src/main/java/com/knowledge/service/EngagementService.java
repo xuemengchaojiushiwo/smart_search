@@ -87,6 +87,17 @@ public class EngagementService {
 		feedbackMapper.insert(fb);
 	}
 
+	public void feedback(Long knowledgeId, Long userId, String content, String feedbackType) {
+		KnowledgeFeedback fb = new KnowledgeFeedback();
+		fb.setKnowledgeId(knowledgeId);
+		fb.setUserId(userId);
+		fb.setFeedbackType(feedbackType);
+		fb.setContent(content);
+		fb.setCreatedTime(LocalDateTime.now());
+		fb.setDeleted(0);
+		feedbackMapper.insert(fb);
+	}
+
 	// 分页查询反馈列表（按知识ID/用户ID可选过滤）
 	public Page<KnowledgeFeedback> listFeedbacks(Integer page, Integer size, Long knowledgeId, Long userId) {
 		int p = (page == null || page < 1) ? 1 : page;

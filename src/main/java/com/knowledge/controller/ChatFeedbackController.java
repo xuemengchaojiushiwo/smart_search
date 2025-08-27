@@ -12,6 +12,11 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/chat")
 @Tag(name = "AI回答反馈", description = "针对单次AI回答的点赞/点踩/反馈")
 public class ChatFeedbackController {
+    @GetMapping("/feedback/types")
+    @Operation(summary = "获取反馈类型枚举")
+    public ApiResponse<java.util.List<String>> feedbackTypes() {
+        return ApiResponse.success(java.util.Arrays.asList("out_of_date","unclear","not_relevant"));
+    }
 
     @Autowired
     private ChatFeedbackService chatFeedbackService;
@@ -33,7 +38,8 @@ public class ChatFeedbackController {
                                            @RequestBody(required = false) DislikeBody body) {
         Long uid = (body != null && body.getUserId() != null) ? body.getUserId() : userId;
         String content = body != null ? body.getContent() : null;
-        chatFeedbackService.dislikeAnswer(sessionId, messageId, uid, content);
+        String type = body != null ? body.getFeedbackType() : null;
+        chatFeedbackService.dislikeAnswer(sessionId, messageId, uid, content, type);
         return ApiResponse.success(null);
     }
 
@@ -41,6 +47,7 @@ public class ChatFeedbackController {
     private static class DislikeBody {
         private String content;
         private Long userId;
+        private String feedbackType; // out_of_date|unclear|not_relevant
     }
 }
 

@@ -19,6 +19,8 @@ public class ChatFeedback {
 
     private String attitude; // like / dislike
 
+    private String feedbackType; // out_of_date / unclear / not_relevant
+
     private String content; // optional reason
 
     private LocalDateTime createdTime;

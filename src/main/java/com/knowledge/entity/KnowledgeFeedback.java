@@ -15,6 +15,8 @@ public class KnowledgeFeedback {
 
 	private Long userId;
 
+	private String feedbackType; // out_of_date/unclear/not_relevant
+
 	private String content;
 
 	private LocalDateTime createdTime;
