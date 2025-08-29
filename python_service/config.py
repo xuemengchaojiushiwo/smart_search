@@ -105,15 +105,28 @@ CHUNKING_CONFIG = {
     }
 }
 
+# AI API 配置开关
+AI_API_SWITCH = "geekai"  # 可选值: "geekai", "custom"
+
 # 极客智坊 API 配置
 GEEKAI_API_KEY = "sk-fN48cWer80XHieChQuQqGGZNdcSivSn3b9EgpH5eu6MP4eST"
 GEEKAI_API_BASE = "https://geekai.co/api/v1"
 GEEKAI_EMBEDDING_URL = f"{GEEKAI_API_BASE}/embeddings"
 GEEKAI_CHAT_URL = f"{GEEKAI_API_BASE}/chat/completions"
 
+# 自定义AI API 配置
+CUSTOM_AI_API_BASE = ""  # 自定义AI API地址，暂时为空
+CUSTOM_AI_API_KEY = ""   # 自定义AI API密钥，暂时为空
+CUSTOM_AI_CHAT_URL = f"{CUSTOM_AI_API_BASE}/chat/completions" if CUSTOM_AI_API_BASE else ""
+CUSTOM_AI_EMBEDDING_URL = f"{CUSTOM_AI_API_BASE}/embeddings" if CUSTOM_AI_API_BASE else ""
+
 # 默认模型配置
 DEFAULT_CHAT_MODEL = "gpt-4o-mini"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+
+# 自定义AI模型配置
+CUSTOM_AI_CHAT_MODEL = "default"
+CUSTOM_AI_EMBEDDING_MODEL = "multilingual-e5-large-instruct"
 
 # 服务配置
 HOST = "0.0.0.0"
