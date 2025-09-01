@@ -1,5 +1,6 @@
 package com.knowledge.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import javax.validation.constraints.NotBlank;
@@ -21,4 +22,8 @@ public class ChatRequest {
     
     // 是否流式响应
     private Boolean stream = false;
+    
+    // 指定特定文件名进行RAG检索（可选）
+    @Schema(description = "指定特定文件名进行RAG检索，如'安联美元基金.pdf'", example = "员工手册V2.1.pdf")
+    private String sourceFile;
 }

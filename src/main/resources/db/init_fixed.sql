@@ -47,6 +47,15 @@ CREATE TABLE IF NOT EXISTS knowledge (
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 知识-工作空间 关联表（多对多）
+CREATE TABLE IF NOT EXISTS knowledge_workspace (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    knowledge_id BIGINT NOT NULL,
+    workspace VARCHAR(50) NOT NULL,
+    UNIQUE KEY uk_kw (knowledge_id, workspace),
+    INDEX idx_kw_knowledge (knowledge_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 知识版本表
 CREATE TABLE IF NOT EXISTS knowledge_versions (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,

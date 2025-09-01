@@ -43,6 +43,9 @@ public class KnowledgeService {
     
     @Autowired
     private ElasticsearchService elasticsearchService;
+
+    @Autowired
+    private KnowledgeWorkspaceService knowledgeWorkspaceService;
     
     /**
      * 创建知识
@@ -58,9 +61,12 @@ public class KnowledgeService {
         knowledge.setDownloadCount(0);
         
         knowledgeMapper.insert(knowledge);
+        // 绑定工作空间（多对多）
+        knowledgeWorkspaceService.replaceBindings(knowledge.getId(), dto.getWorkspaces());
         
-        // 索引到ES
-        elasticsearchService.indexKnowledge(knowledge, null);
+        // 索引到ES（含workspace）
+        java.util.List<String> workspaces = knowledgeWorkspaceService.listWorkspaces(knowledge.getId());
+        elasticsearchService.indexKnowledge(knowledge, null, workspaces);
         
         log.info("知识创建成功: ID={}, 名称={}", knowledge.getId(), knowledge.getName());
         return knowledge;
@@ -88,10 +94,13 @@ public class KnowledgeService {
         existingKnowledge.setUpdatedTime(LocalDateTime.now());
         
         knowledgeMapper.updateById(existingKnowledge);
+        // 更新工作空间绑定
+        knowledgeWorkspaceService.replaceBindings(id, dto.getWorkspaces());
         
         // 更新ES索引
         List<Attachment> attachments = attachmentService.getByKnowledgeId(id);
-        elasticsearchService.updateKnowledge(existingKnowledge, attachments);
+        java.util.List<String> workspaces = knowledgeWorkspaceService.listWorkspaces(id);
+        elasticsearchService.updateKnowledge(existingKnowledge, attachments, workspaces);
         
         log.info("知识更新成功: ID={}, 名称={}", id, existingKnowledge.getName());
         return existingKnowledge;
@@ -160,6 +169,24 @@ public class KnowledgeService {
         
         return knowledgePage.convert(this::convertToVO);
     }
+
+    public IPage<KnowledgeVO> getKnowledgeListFiltered(int page, int size, java.util.List<String> allowedWorkspaces) {
+        if (allowedWorkspaces == null || allowedWorkspaces.isEmpty()) {
+            return getKnowledgeList(page, size);
+        }
+        Page<Knowledge> pageParam = new Page<>(page, size);
+        java.util.Set<Long> ids = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaces(allowedWorkspaces);
+        if (ids.isEmpty()) {
+            Page<KnowledgeVO> empty = new Page<>(page, size);
+            empty.setTotal(0);
+            empty.setRecords(java.util.Collections.emptyList());
+            return empty;
+        }
+        LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Knowledge::getDeleted, 0).in(Knowledge::getId, ids).orderByDesc(Knowledge::getUpdatedTime);
+        IPage<Knowledge> knowledgePage = knowledgeMapper.selectPage(pageParam, wrapper);
+        return knowledgePage.convert(this::convertToVO);
+    }
     
     /**
      * 获取某个父知识下的直接子节点
@@ -177,6 +204,31 @@ public class KnowledgeService {
             wrapper.eq(Knowledge::getParentId, parentId);
         }
         wrapper.orderByAsc(Knowledge::getNodeType); // folder优先
+        wrapper.orderByDesc(Knowledge::getUpdatedTime);
+        IPage<Knowledge> knowledgePage = knowledgeMapper.selectPage(pageParam, wrapper);
+        return knowledgePage.convert(this::convertToVO);
+    }
+
+    public IPage<KnowledgeVO> getChildrenFiltered(Long parentId, int page, int size, java.util.List<String> allowedWorkspaces) {
+        if (allowedWorkspaces == null || allowedWorkspaces.isEmpty()) {
+            return getChildren(parentId, page, size);
+        }
+        Page<Knowledge> pageParam = new Page<>(page, size);
+        java.util.Set<Long> ids = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaces(allowedWorkspaces);
+        if (ids.isEmpty()) {
+            Page<KnowledgeVO> empty = new Page<>(page, size);
+            empty.setTotal(0);
+            empty.setRecords(java.util.Collections.emptyList());
+            return empty;
+        }
+        LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Knowledge::getDeleted, 0).in(Knowledge::getId, ids);
+        if (parentId == null) {
+            wrapper.and(w -> w.isNull(Knowledge::getParentId).or().eq(Knowledge::getParentId, 0L));
+        } else {
+            wrapper.eq(Knowledge::getParentId, parentId);
+        }
+        wrapper.orderByAsc(Knowledge::getNodeType);
         wrapper.orderByDesc(Knowledge::getUpdatedTime);
         IPage<Knowledge> knowledgePage = knowledgeMapper.selectPage(pageParam, wrapper);
         return knowledgePage.convert(this::convertToVO);
@@ -214,11 +266,11 @@ public class KnowledgeService {
     /**
      * 搜索知识
      */
-    public IPage<KnowledgeVO> searchKnowledge(String query, int page, int size) {
+    public IPage<KnowledgeVO> searchKnowledge(String query, int page, int size, java.util.List<String> allowedWorkspaces) {
         // 仅使用ES搜索，失败直接抛出异常
         // 传入页码与大小，由ES服务内部计算from/size
         List<com.knowledge.vo.ElasticsearchResultVO> esResults = elasticsearchService
-            .searchKnowledge(query, page, size);
+            .searchKnowledge(query, page, size, allowedWorkspaces);
 
         List<KnowledgeVO> vos = esResults.stream()
             .map(esResult -> {
@@ -236,6 +288,12 @@ public class KnowledgeService {
                     }
                 }
                 vo.setCreatedBy(esResult.getAuthor());
+                // 绑定的工作空间（从DB补齐）
+                try {
+                    vo.setWorkspaces(knowledgeWorkspaceService.listWorkspaces(vo.getId()));
+                } catch (Exception ignore) {
+                    vo.setWorkspaces(java.util.Collections.emptyList());
+                }
                 // 附件列表（从数据库补齐，前端需要展示）
                 try {
                     List<Attachment> atts = attachmentService.getByKnowledgeId(vo.getId());
@@ -266,7 +324,7 @@ public class KnowledgeService {
 
         Page<KnowledgeVO> result = new Page<>(page, size);
         result.setRecords(vos);
-        result.setTotal(elasticsearchService.getSearchCount(query));
+        result.setTotal(elasticsearchService.getSearchCount(query, allowedWorkspaces));
         return result;
     }
     
@@ -339,6 +397,12 @@ public class KnowledgeService {
         BeanUtils.copyProperties(knowledge, vo);
         // 兼容：categoryId 赋值为 parentId，便于旧前端/测试平滑过渡
         vo.setCategoryId(knowledge.getParentId());
+        // 绑定的工作空间
+        try {
+            vo.setWorkspaces(knowledgeWorkspaceService.listWorkspaces(knowledge.getId()));
+        } catch (Exception ignore) {
+            vo.setWorkspaces(java.util.Collections.emptyList());
+        }
         // 附件列表填充
         try {
             List<Attachment> attachments = attachmentService.getByKnowledgeId(knowledge.getId());
@@ -429,9 +493,10 @@ public class KnowledgeService {
             // 同步保存附件，确保列表和详情能看到关联文件
             attachmentService.saveFiles(knowledgeId, new MultipartFile[]{file}, currentUser);
 
-            // 更新ES中的知识索引，包含最新附件信息
+            // 更新ES中的知识索引，包含最新附件信息与workspaces
             List<Attachment> attachments = attachmentService.getByKnowledgeId(knowledgeId);
-            elasticsearchService.updateKnowledge(knowledge, attachments);
+            java.util.List<String> workspaces = knowledgeWorkspaceService.listWorkspaces(knowledgeId);
+            elasticsearchService.updateKnowledge(knowledge, attachments, workspaces);
             
             log.info("知识文档处理成功: knowledgeId={}, fileName={}", knowledgeId, file.getOriginalFilename());
             return result;

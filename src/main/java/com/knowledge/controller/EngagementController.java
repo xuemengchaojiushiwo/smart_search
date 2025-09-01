@@ -1,5 +1,7 @@
 package com.knowledge.controller;
 
+import com.knowledge.dto.FeedbackTypeDTO;
+import com.knowledge.enums.FeedbackType;
 import com.knowledge.service.EngagementService;
 import com.knowledge.vo.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -9,6 +11,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+
 @Slf4j
 @RestController
 @RequestMapping("/api/engagement")
@@ -17,6 +23,15 @@ public class EngagementController {
 
 	@Autowired
 	private EngagementService engagementService;
+
+	@GetMapping("/feedback/types")
+	@Operation(summary = "获取反馈类型枚举列表")
+	public ApiResponse<List<FeedbackTypeDTO>> getFeedbackTypes() {
+		List<FeedbackTypeDTO> feedbackTypes = Arrays.stream(FeedbackType.values())
+				.map(type -> new FeedbackTypeDTO(type.getCode(), type.getDescription()))
+				.collect(Collectors.toList());
+		return ApiResponse.success(feedbackTypes);
+	}
 
 	@PostMapping("/like/{knowledgeId}")
 	@Operation(summary = "点赞")
@@ -72,6 +87,23 @@ public class EngagementController {
 	public ApiResponse<Void> deleteFeedback(@PathVariable Long id) {
 		engagementService.deleteFeedback(id);
 		return ApiResponse.success(null);
+	}
+
+	@GetMapping("/favorites")
+	@Operation(summary = "用户收藏列表")
+	public ApiResponse<Object> listUserFavorites(
+			@RequestParam(required = false) Integer page,
+			@RequestParam(required = false) Integer size,
+			@RequestParam(defaultValue = "1") Long userId) {
+		return ApiResponse.success(engagementService.listUserFavorites(page, size, userId));
+	}
+
+	@GetMapping("/favorite/status/{knowledgeId}")
+	@Operation(summary = "查询用户对某个知识的收藏状态")
+	public ApiResponse<Object> getFavoriteStatus(
+			@PathVariable Long knowledgeId,
+			@RequestParam(defaultValue = "1") Long userId) {
+		return ApiResponse.success(engagementService.getFavoriteStatus(knowledgeId, userId));
 	}
 }
 

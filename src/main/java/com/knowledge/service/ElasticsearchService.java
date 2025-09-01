@@ -47,7 +47,7 @@ public class ElasticsearchService {
      * @param attachments 附件列表
      * @return 是否成功
      */
-    public boolean indexKnowledge(Knowledge knowledge, List<Attachment> attachments) {
+    public boolean indexKnowledge(Knowledge knowledge, List<Attachment> attachments, List<String> workspaces) {
         try {
             Map<String, Object> document = new HashMap<>();
 
@@ -65,6 +65,9 @@ public class ElasticsearchService {
             document.put("status", knowledge.getStatus());
             document.put("search_count", knowledge.getSearchCount());
             document.put("download_count", knowledge.getDownloadCount());
+            if (workspaces != null && !workspaces.isEmpty()) {
+                document.put("workspaces", workspaces);
+            }
 
             // 时间字段
             if (knowledge.getEffectiveStartTime() != null) {
@@ -98,7 +101,7 @@ public class ElasticsearchService {
                 document.put("attachment_count", attachments.size());
             }
             
-            // 创建索引请求
+            // 额外：工作空间信息留空（由调用方补充或后续扩展）
             IndexRequest indexRequest = new IndexRequest(INDEX_NAME)
                     .id(knowledge.getId().toString())
                     .source(document, XContentType.JSON);
@@ -121,7 +124,7 @@ public class ElasticsearchService {
      * @param attachments 附件列表
      * @return 是否成功
      */
-    public boolean updateKnowledge(Knowledge knowledge, List<Attachment> attachments) {
+    public boolean updateKnowledge(Knowledge knowledge, List<Attachment> attachments, List<String> workspaces) {
         try {
             Map<String, Object> document = new HashMap<>();
 
@@ -137,6 +140,9 @@ public class ElasticsearchService {
             document.put("download_count", knowledge.getDownloadCount());
             if (knowledge.getTableData() != null) {
                 document.put("table_data", knowledge.getTableData());
+            }
+            if (workspaces != null && !workspaces.isEmpty()) {
+                document.put("workspaces", workspaces);
             }
 
             // 时间字段
@@ -238,7 +244,7 @@ public class ElasticsearchService {
      * @param size  每页大小
      * @return 搜索结果
      */
-    public List<ElasticsearchResultVO> searchKnowledge(String query, int page, int size) {
+    public List<ElasticsearchResultVO> searchKnowledge(String query, int page, int size, List<String> allowedWorkspaces) {
         try {
             // 构建搜索请求
             SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
@@ -257,6 +263,9 @@ public class ElasticsearchService {
             org.elasticsearch.index.query.BoolQueryBuilder boolQuery = QueryBuilders.boolQuery()
                     .must(multiMatchQuery)
                     .filter(QueryBuilders.existsQuery("id"));
+            if (allowedWorkspaces != null && !allowedWorkspaces.isEmpty()) {
+                boolQuery.filter(QueryBuilders.termsQuery("workspaces", allowedWorkspaces));
+            }
 
             searchSourceBuilder.query(boolQuery);
 
@@ -349,7 +358,7 @@ public class ElasticsearchService {
      * @param query 搜索关键词
      * @return 总数
      */
-    public long getSearchCount(String query) {
+    public long getSearchCount(String query, List<String> allowedWorkspaces) {
         try {
             SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
             SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
@@ -365,6 +374,9 @@ public class ElasticsearchService {
             org.elasticsearch.index.query.BoolQueryBuilder boolQuery = QueryBuilders.boolQuery()
                     .must(multiMatchQuery)
                     .filter(QueryBuilders.existsQuery("id"));
+            if (allowedWorkspaces != null && !allowedWorkspaces.isEmpty()) {
+                boolQuery.filter(QueryBuilders.termsQuery("workspaces", allowedWorkspaces));
+            }
 
             searchSourceBuilder.query(boolQuery);
             searchSourceBuilder.size(0); // 只获取总数，不返回文档

@@ -30,7 +30,7 @@ public class ElasticsearchController {
         
         try {
             log.info("Elasticsearch搜索: query={}, page={}, size={}", query, page, size);
-            List<ElasticsearchResultVO> results = elasticsearchService.searchKnowledge(query, page, size);
+            List<ElasticsearchResultVO> results = elasticsearchService.searchKnowledge(query, page, size, null);
             return ApiResponse.success(results);
         } catch (Exception e) {
             log.error("Elasticsearch搜索失败", e);
@@ -45,7 +45,7 @@ public class ElasticsearchController {
         
         try {
             log.info("获取搜索总数: query={}", query);
-            long count = elasticsearchService.getSearchCount(query);
+            long count = elasticsearchService.getSearchCount(query, null);
             return ApiResponse.success(count);
         } catch (Exception e) {
             log.error("获取搜索总数失败", e);

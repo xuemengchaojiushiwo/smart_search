@@ -38,6 +38,43 @@ public class KnowledgeController {
     private KnowledgeService knowledgeService;
     @Autowired
     private com.knowledge.service.AttachmentService attachmentService;
+    @Autowired
+    private com.knowledge.service.UserDeptRoleService userDeptRoleService;
+    @Autowired
+    private com.knowledge.service.UserService userService;
+
+    private List<String> resolveAllowedWorkspaces(String userId) {
+        try {
+            if (userId == null) return null;
+            Long uid = null;
+            try { uid = Long.valueOf(userId); } catch (Exception ignore) {}
+            if (uid != null) {
+                List<com.knowledge.entity.UserDeptRole> records = userDeptRoleService.listByUser(uid);
+                if (records != null && !records.isEmpty()) {
+                    List<String> list = new ArrayList<>();
+                    for (com.knowledge.entity.UserDeptRole r : records) {
+                        if (r.getDept() != null && !r.getDept().trim().isEmpty()) list.add(r.getDept().trim());
+                    }
+                    if (!list.isEmpty()) return list;
+                }
+                com.knowledge.entity.User u = userService.getById(uid);
+                if (u != null && u.getWorkspace() != null && !u.getWorkspace().trim().isEmpty()) {
+                    String[] parts = u.getWorkspace().split(",");
+                    List<String> list = new ArrayList<>();
+                    for (String p : parts) { if (!p.trim().isEmpty()) list.add(p.trim()); }
+                    if (!list.isEmpty()) return list;
+                }
+            }
+        } catch (Exception ignore) {}
+        return null;
+    }
+
+    // 简化：从头部兼容获取用户ID
+    private String resolveUserIdFromHeader(javax.servlet.http.HttpServletRequest request) {
+        String uid = request.getHeader("X-User-Id");
+        if (uid != null && !uid.isEmpty()) return uid;
+        return null; // 可扩展JWT解析
+    }
     
     @PostMapping
     @Operation(summary = "创建知识", description = "创建新的知识条目")
@@ -130,7 +167,10 @@ public class KnowledgeController {
     public ApiResponse<IPage<KnowledgeVO>> getKnowledgeList(
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size) {
-        IPage<KnowledgeVO> result = knowledgeService.getKnowledgeList(page, size);
+        javax.servlet.http.HttpServletRequest req = ((org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()).getRequest();
+        String userId = resolveUserIdFromHeader(req);
+        List<String> allowed = resolveAllowedWorkspaces(userId);
+        IPage<KnowledgeVO> result = knowledgeService.getKnowledgeListFiltered(page, size, allowed);
         return ApiResponse.success("获取知识列表成功", result);
     }
     
@@ -140,7 +180,10 @@ public class KnowledgeController {
             @Parameter(description = "父知识ID", required = true, example = "1") @PathVariable Long parentId,
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size) {
-        IPage<KnowledgeVO> result = knowledgeService.getChildren(parentId == 0 ? null : parentId, page, size);
+        javax.servlet.http.HttpServletRequest req = ((org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()).getRequest();
+        String userId = resolveUserIdFromHeader(req);
+        List<String> allowed = resolveAllowedWorkspaces(userId);
+        IPage<KnowledgeVO> result = knowledgeService.getChildrenFiltered(parentId == 0 ? null : parentId, page, size, allowed);
         return ApiResponse.success("获取子知识成功", result);
     }
 

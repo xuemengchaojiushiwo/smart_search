@@ -89,12 +89,23 @@ public class PythonService {
      * 调用Python RAG服务进行智能问答
      */
     public Map<String, Object> chatWithRag(String question, String userId) {
+        return chatWithRag(question, userId, null);
+    }
+    
+    /**
+     * 调用Python RAG服务进行智能问答（支持指定文件）
+     */
+    public Map<String, Object> chatWithRag(String question, String userId, String sourceFile) {
         try {
             String url = pythonServiceUrl + "/api/rag/chat";
             
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("question", question);
             requestBody.put("user_id", userId);
+            if (sourceFile != null && !sourceFile.trim().isEmpty()) {
+                requestBody.put("source_file", sourceFile.trim());
+                log.info("RAG对话指定文件: {}", sourceFile);
+            }
             
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -105,7 +116,7 @@ public class PythonService {
             
             if (response.getStatusCode() == HttpStatus.OK) {
                 Map<String, Object> result = JSON.parseObject(response.getBody(), Map.class);
-                log.info("RAG对话成功: {}", question);
+                log.info("RAG对话成功: {} {}", question, sourceFile != null ? "(文件: " + sourceFile + ")" : "");
                 return result;
             } else {
                 log.error("RAG对话失败: {}, 状态码: {}", question, response.getStatusCode());

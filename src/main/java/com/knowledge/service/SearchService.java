@@ -39,6 +39,12 @@ public class SearchService {
     @Autowired
     private ChatPersistenceService chatPersistenceService;
 
+    @Autowired
+    private UserDeptRoleService userDeptRoleService;
+
+    @Autowired
+    private UserService userService;
+
     // 搜索知识
     public SearchResultVO searchKnowledge(SearchRequest request, Long userId) {
         // 记录搜索历史
@@ -48,9 +54,12 @@ public class SearchService {
         history.setSearchTime(LocalDateTime.now());
         searchHistoryService.save(history);
 
-        // ES搜索（仅知识元数据，不含段落内容）
+        // 解析用户可访问的 workspace 列表
+        List<String> allowedWorkspaces = resolveAllowedWorkspaces(userId);
+
+        // ES搜索（仅知识元数据，不含段落内容），按 workspace 过滤
         IPage<com.knowledge.vo.KnowledgeVO> esResults = knowledgeService.searchKnowledge(
-            request.getQuery(), request.getPage(), request.getSize());
+            request.getQuery(), request.getPage(), request.getSize(), allowedWorkspaces);
 
         // 增加搜索次数
         esResults.getRecords().forEach(knowledge -> {
@@ -81,7 +90,7 @@ public class SearchService {
         }
 
         try {
-            Map<String, Object> ragResponse = pythonService.chatWithRag(q, String.valueOf(userId));
+            Map<String, Object> ragResponse = pythonService.chatWithRag(q, String.valueOf(userId), null);
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> references = (List<Map<String, Object>>) ragResponse.get("references");
             RagResultVO ragVo = new RagResultVO();
@@ -214,6 +223,30 @@ public class SearchService {
         searchHistoryService.updateById(history);
 
         return result;
+    }
+
+    private List<String> resolveAllowedWorkspaces(Long userId) {
+        try {
+            if (userId == null) return null;
+            List<com.knowledge.entity.UserDeptRole> records = userDeptRoleService.listByUser(userId);
+            if (records != null && !records.isEmpty()) {
+                List<String> depts = new java.util.ArrayList<>();
+                for (com.knowledge.entity.UserDeptRole r : records) {
+                    if (r.getDept() != null && !r.getDept().trim().isEmpty()) {
+                        depts.add(r.getDept().trim());
+                    }
+                }
+                return depts.isEmpty() ? null : depts;
+            }
+            com.knowledge.entity.User u = userService.getById(userId);
+            if (u != null && u.getWorkspace() != null && !u.getWorkspace().trim().isEmpty()) {
+                String[] parts = u.getWorkspace().split(",");
+                List<String> list = new java.util.ArrayList<>();
+                for (String p : parts) { if (!p.trim().isEmpty()) list.add(p.trim()); }
+                return list.isEmpty() ? null : list;
+            }
+        } catch (Exception ignore) {}
+        return null; // null 表示不加过滤
     }
 
     // 获取搜索建议

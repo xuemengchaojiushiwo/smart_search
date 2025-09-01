@@ -176,6 +176,7 @@ class LdapValidateRequest(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     user_id: str
+    source_file: Optional[str] = None  # 可选：指定特定文件名进行RAG检索
 
 class DocumentProcessRequest(BaseModel):
     knowledge_id: int
@@ -1394,17 +1395,23 @@ def chat_with_rag(request: ChatRequest):
                 session_id=request.user_id
             )
         
+        # 构建过滤条件
+        filters = [{"exists": {"field": "embedding"}}]
+        
+        # 如果指定了特定文件，则只检索该文件的chunks
+        if request.source_file:
+            logger.info(f"按文件名过滤RAG检索: {request.source_file}")
+            filters.append({"term": {"source_file": request.source_file}})
+        
         # 简化搜索逻辑 - 直接返回语义相似度最高的chunks
         # 仅检索包含embedding字段的文档，避免脚本在缺失字段时报错
         search_query = {
-            "size": 5,  # 返回前5个最相关的chunks
+            "size": 10 if request.source_file else 5,  # 针对特定文件时返回更多chunks
             "query": {
                 "script_score": {
                     "query": {
                         "bool": {
-                            "filter": [
-                                {"exists": {"field": "embedding"}}
-                            ]
+                            "filter": filters
                         }
                     },
                     "script": {
