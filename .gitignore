@@ -40,6 +40,9 @@ uploads/
 *.db
 *.sqlite
 
+# Python服务本地密钥（不要提交）
+python_service/secrets.json
+
 # 配置文件中的敏感信息（如果有的话）
 application-prod.yml
 application-local.yml

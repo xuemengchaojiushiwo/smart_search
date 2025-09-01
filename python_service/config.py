@@ -1,4 +1,7 @@
 # Python服务配置文件
+import os
+import json
+from pathlib import Path
 
 # Elasticsearch配置
 ES_CONFIG = {
@@ -108,8 +111,22 @@ CHUNKING_CONFIG = {
 # AI API 配置开关
 AI_API_SWITCH = "geekai"  # 可选值: "geekai", "custom"
 
-# 极客智坊 API 配置
-GEEKAI_API_KEY = "sk-fN48cWer80XHieChQuQqGGZNdcSivSn3b9EgpH5eu6MP4eST"
+# 极客智坊 API 配置（优先从本地 secrets.json 读取，其次环境变量）
+def _load_secret_key_from_file() -> str:
+    try:
+        secrets_path = Path(__file__).parent / "secrets.json"
+        if secrets_path.exists():
+            with open(secrets_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                key = data.get("GEEKAI_API_KEY", "")
+                if isinstance(key, str):
+                    return key
+    except Exception:
+        # 静默失败，回退到环境变量
+        pass
+    return ""
+
+GEEKAI_API_KEY = _load_secret_key_from_file() or os.getenv("GEEKAI_API_KEY", "")
 GEEKAI_API_BASE = "https://geekai.co/api/v1"
 GEEKAI_EMBEDDING_URL = f"{GEEKAI_API_BASE}/embeddings"
 GEEKAI_CHAT_URL = f"{GEEKAI_API_BASE}/chat/completions"
