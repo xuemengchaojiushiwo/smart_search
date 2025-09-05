@@ -1,0 +1,5 @@
+SELECT CHARACTER_SET_NAME,COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='你的库' AND TABLE_NAME='knowledge' AND COLUMN_NAME='description';
+如不是 utf8mb4，修改该列
+ALTER TABLE knowledge MODIFY description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+如整表不是 utf8mb4
+ALTER TABLE knowledge CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
