@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+历史系统数据迁移工具
+从 SQLite3 迁移到 MySQL
+"""
+
+import sqlite3
+import mysql.connector
+import json
+import re
+from datetime import datetime
+import os
+import sys
+
+class LegacyDataMigration:
+    def __init__(self, sqlite_db_path, mysql_config):
+        self.sqlite_db_path = sqlite_db_path
+        self.mysql_config = mysql_config
+        self.mysql_conn = None
+        self.sqlite_conn = None
+        self.id_mapping = {}  # 存储旧ID到新ID的映射
+        
+    def connect_databases(self):
+        """连接数据库"""
+        try:
+            # 连接 SQLite
+            self.sqlite_conn = sqlite3.connect(self.sqlite_db_path)
+            print(f"✅ 已连接 SQLite 数据库: {self.sqlite_db_path}")
+            
+            # 连接 MySQL
+            self.mysql_conn = mysql.connector.connect(**self.mysql_config)
+            print(f"✅ 已连接 MySQL 数据库: {self.mysql_config['database']}")
+            
+        except Exception as e:
+            print(f"❌ 数据库连接失败: {e}")
+            sys.exit(1)
+
+    def ensure_target_schema(self):
+        """确保目标库存在迁移所需的新字段（幂等）。"""
+        cursor = self.mysql_conn.cursor()
+        add_columns_sql = [
+            "ALTER TABLE users ADD COLUMN display_name VARCHAR(150) NULL",
+            "ALTER TABLE users ADD COLUMN profile_picture VARCHAR(255) NULL",
+            "ALTER TABLE users ADD COLUMN password VARCHAR(255) NULL",
+            "ALTER TABLE users ADD COLUMN last_login DATETIME NULL",
+            "ALTER TABLE users ADD COLUMN date_joined DATETIME NULL",
+        ]
+        for stmt in add_columns_sql:
+            try:
+                cursor.execute(stmt)
+            except Exception as e:
+                # 已存在则忽略
+                if 'Duplicate column name' in str(e) or 'exists' in str(e).lower():
+                    continue
+                raise
+        self.mysql_conn.commit()
+
+    def _sqlite_columns(self, table_name: str):
+        """读取 SQLite 表字段名集合。"""
+        cur = self.sqlite_conn.cursor()
+        cur.execute(f"PRAGMA table_info('{table_name}')")
+        return {row[1] for row in cur.fetchall()}  # row[1] is column name
+    
+    def parse_path_to_hierarchy(self, path):
+        """
+        解析 path 编码为层级结构
+        例如: 00010001000P00030004 -> [1, 1, 16, 3, 4]
+        """
+        if not path:
+            return []
+        
+        # 按 000 分割 path
+        parts = path.split('000')
+        hierarchy = []
+        
+        for part in parts:
+            if not part:
+                continue
+            # 将字母转换为数字
+            if part.isdigit():
+                hierarchy.append(int(part))
+            else:
+                # 字母转数字: A=10, B=11, ..., P=16, ...
+                hierarchy.append(ord(part) - ord('A') + 10)
+        
+        return hierarchy
+    
+    def migrate_users(self):
+        """迁移用户数据"""
+        print("\n🔄 开始迁移用户数据...")
+        
+        cursor = self.sqlite_conn.cursor()
+        cols = self._sqlite_columns('app_user')
+        select_fields = [
+            'id', 'username', 'email', 'first_name', 'last_name',
+            ('password' if 'password' in cols else "NULL AS password"),
+            ('last_login' if 'last_login' in cols else "NULL AS last_login"),
+            ('date_joined' if 'date_joined' in cols else "datetime('now') AS date_joined"),
+            ('is_active' if 'is_active' in cols else "1 AS is_active"),
+            ('display_name' if 'display_name' in cols else "NULL AS display_name"),
+            ('profile_picture' if 'profile_picture' in cols else "NULL AS profile_picture"),
+            ('role' if 'role' in cols else "NULL AS role"),
+        ]
+        cursor.execute(f"SELECT {', '.join(select_fields)} FROM app_user")
+        users = cursor.fetchall()
+        
+        mysql_cursor = self.mysql_conn.cursor()
+        
+        for user in users:
+            old_id, username, email, first_name, last_name, password, last_login, date_joined, is_active, display_name, profile_picture, role = user
+            
+            # 生成新的用户ID
+            mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM users")
+            new_id = mysql_cursor.fetchone()[0]
+            
+            # 插入用户数据
+            insert_sql = """
+            INSERT INTO users (id, username, email, staffid, system_role, display_name, profile_picture, role, password, last_login, status, created_time, deleted)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            values = (
+                new_id,
+                username or '',
+                email or '',
+                username or '',  # 使用 username 作为 staffid
+                'ADMIN' if (role or '').upper() == 'ADMIN' else 'USER',  # 默认或按历史role
+                display_name,
+                profile_picture,
+                role,
+                password,
+                last_login,
+                1 if is_active else 0,
+                date_joined or datetime.now(),
+                0
+            )
+            
+            mysql_cursor.execute(insert_sql, values)
+            self.id_mapping[f"user_{old_id}"] = new_id
+            
+        self.mysql_conn.commit()
+        print(f"✅ 用户数据迁移完成: {len(users)} 条记录")
+    
+    def migrate_categories(self):
+        """迁移分类数据 (转换为 knowledge 表的 folder 类型)"""
+        print("\n🔄 开始迁移分类数据...")
+        
+        cursor = self.sqlite_conn.cursor()
+        cols = self._sqlite_columns('app_category')
+        select_fields = [
+            'id', 'name', 'path', 'depth',
+            ('created' if 'created' in cols else "datetime('now') AS created"),
+            ('updated' if 'updated' in cols else "NULL AS updated"),
+        ]
+        cursor.execute(f"SELECT {', '.join(select_fields)} FROM app_category ORDER BY path")
+        categories = cursor.fetchall()
+        
+        mysql_cursor = self.mysql_conn.cursor()
+        
+        # 先创建所有分类节点，不设置 parent_id
+        for category in categories:
+            old_id, name, path, depth, created, updated = category
+            
+            # 生成新的ID
+            mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM knowledge")
+            new_id = mysql_cursor.fetchone()[0]
+            
+            insert_sql = """
+            INSERT INTO knowledge (id, name, parent_id, node_type, created_by, created_time, updated_time, status, deleted)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            values = (
+                new_id,
+                name or '',
+                None,  # 先不设置 parent_id
+                'folder',
+                'admin',  # 默认创建人
+                created or datetime.now(),
+                updated,
+                1,
+                0
+            )
+            
+            mysql_cursor.execute(insert_sql, values)
+            self.id_mapping[f"category_{old_id}"] = new_id
+            
+        self.mysql_conn.commit()
+        
+        # 现在设置 parent_id 关系
+        for category in categories:
+            old_id, name, path, depth, created, updated = category
+            new_id = self.id_mapping[f"category_{old_id}"]
+            
+            # 解析 path 获取父节点
+            hierarchy = self.parse_path_to_hierarchy(path)
+            if len(hierarchy) > 1:
+                # 找到父节点的 path
+                parent_path = '000'.join([''] + [str(h) if h < 10 else chr(h - 10 + ord('A')) for h in hierarchy[:-1]])
+                
+                # 查找父节点
+                cursor.execute("SELECT id FROM app_category WHERE path = ?", (parent_path,))
+                parent_result = cursor.fetchone()
+                if parent_result:
+                    parent_old_id = parent_result[0]
+                    parent_new_id = self.id_mapping[f"category_{parent_old_id}"]
+                    
+                    # 更新 parent_id
+                    update_sql = "UPDATE knowledge SET parent_id = %s WHERE id = %s"
+                    mysql_cursor.execute(update_sql, (parent_new_id, new_id))
+        
+        self.mysql_conn.commit()
+        print(f"✅ 分类数据迁移完成: {len(categories)} 条记录")
+    
+    def migrate_content(self):
+        """迁移内容数据"""
+        print("\n🔄 开始迁移内容数据...")
+        
+        cursor = self.sqlite_conn.cursor()
+        cols = self._sqlite_columns('app_contentitem')
+        # 兼容历史命名：expired 或 expir_date
+        expired_expr = (
+            'expired' if 'expired' in cols else (
+                'expir_date AS expired' if 'expir_date' in cols else "NULL AS expired"
+            )
+        )
+        select_fields = [
+            'id', 'title', 'text',
+            ('keywords' if 'keywords' in cols else "NULL AS keywords"),
+            ('created' if 'created' in cols else "datetime('now') AS created"),
+            ('updated' if 'updated' in cols else "NULL AS updated"),
+            expired_expr,
+            ('category_id' if 'category_id' in cols else "NULL AS category_id"),
+        ]
+        cursor.execute(f"SELECT {', '.join(select_fields)} FROM app_contentitem")
+        contents = cursor.fetchall()
+        
+        mysql_cursor = self.mysql_conn.cursor()
+        
+        for content in contents:
+            old_id, title, text, keywords, created, updated, expired, category_id = content
+            
+            # 生成新的ID
+            mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM knowledge")
+            new_id = mysql_cursor.fetchone()[0]
+            
+            # 转换标签
+            tags = []
+            if keywords:
+                tags = [tag.strip() for tag in keywords.split(',') if tag.strip()]
+            
+            # 获取父分类ID
+            parent_id = None
+            if category_id and f"category_{category_id}" in self.id_mapping:
+                parent_id = self.id_mapping[f"category_{category_id}"]
+            
+            insert_sql = """
+            INSERT INTO knowledge (id, name, description, parent_id, node_type, tags, created_by, created_time, updated_time, effective_end_time, status, deleted)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            values = (
+                new_id,
+                title or '',
+                text or '',
+                parent_id,
+                'doc',
+                json.dumps(tags, ensure_ascii=False),
+                'admin',
+                created or datetime.now(),
+                updated,
+                expired,
+                1,
+                0
+            )
+            
+            mysql_cursor.execute(insert_sql, values)
+            self.id_mapping[f"content_{old_id}"] = new_id
+            
+        self.mysql_conn.commit()
+        print(f"✅ 内容数据迁移完成: {len(contents)} 条记录")
+    
+    def migrate_uploads(self):
+        """迁移文件上传数据"""
+        print("\n🔄 开始迁移文件数据...")
+        
+        cursor = self.sqlite_conn.cursor()
+        cursor.execute("SELECT id, file, created, content_item_id FROM app_upload")
+        uploads = cursor.fetchall()
+        
+        mysql_cursor = self.mysql_conn.cursor()
+        
+        for upload in uploads:
+            old_id, file_path, created, content_item_id = upload
+            
+            # 生成新的ID
+            mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM attachments")
+            new_id = mysql_cursor.fetchone()[0]
+            
+            # 获取关联的知识ID
+            knowledge_id = None
+            if content_item_id and f"content_{content_item_id}" in self.id_mapping:
+                knowledge_id = self.id_mapping[f"content_{content_item_id}"]
+            
+            if not knowledge_id:
+                continue  # 跳过没有关联内容的文件
+            
+            # 提取文件名和类型
+            file_name = os.path.basename(file_path) if file_path else f"file_{old_id}"
+            file_type = os.path.splitext(file_name)[1] if file_name else ''
+            
+            insert_sql = """
+            INSERT INTO attachments (id, knowledge_id, file_name, file_path, file_size, file_type, upload_time, deleted)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            values = (
+                new_id,
+                knowledge_id,
+                file_name,
+                file_path or '',
+                0,  # 文件大小，需要实际计算
+                file_type,
+                created or datetime.now(),
+                0
+            )
+            
+            mysql_cursor.execute(insert_sql, values)
+            
+        self.mysql_conn.commit()
+        print(f"✅ 文件数据迁移完成: {len(uploads)} 条记录")
+    
+    def migrate_feedbacks(self):
+        """迁移反馈数据"""
+        print("\n🔄 开始迁移反馈数据...")
+        
+        cursor = self.sqlite_conn.cursor()
+        cursor.execute("SELECT id, text, created, content_item_id FROM app_feedback")
+        feedbacks = cursor.fetchall()
+        
+        mysql_cursor = self.mysql_conn.cursor()
+        
+        for feedback in feedbacks:
+            old_id, text, created, content_item_id = feedback
+            
+            # 生成新的ID
+            mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM knowledge_feedbacks")
+            new_id = mysql_cursor.fetchone()[0]
+            
+            # 获取关联的知识ID
+            knowledge_id = None
+            if content_item_id and f"content_{content_item_id}" in self.id_mapping:
+                knowledge_id = self.id_mapping[f"content_{content_item_id}"]
+            
+            if not knowledge_id:
+                continue
+            
+            insert_sql = """
+            INSERT INTO knowledge_feedbacks (id, knowledge_id, user_id, content, created_time, deleted)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            
+            values = (
+                new_id,
+                knowledge_id,
+                1,  # 默认用户ID
+                text or '',
+                created or datetime.now(),
+                0
+            )
+            
+            mysql_cursor.execute(insert_sql, values)
+            
+        self.mysql_conn.commit()
+        print(f"✅ 反馈数据迁移完成: {len(feedbacks)} 条记录")
+    
+    def migrate_favorites(self):
+        """迁移收藏数据"""
+        print("\n🔄 开始迁移收藏数据...")
+        
+        cursor = self.sqlite_conn.cursor()
+        cursor.execute("SELECT id, contentitem_id, user_id FROM app_contentitem_user_favourited")
+        favorites = cursor.fetchall()
+        
+        mysql_cursor = self.mysql_conn.cursor()
+        
+        for favorite in favorites:
+            old_id, content_item_id, user_id = favorite
+            
+            # 生成新的ID
+            mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM knowledge_favorites")
+            new_id = mysql_cursor.fetchone()[0]
+            
+            # 获取关联的知识ID
+            knowledge_id = None
+            if content_item_id and f"content_{content_item_id}" in self.id_mapping:
+                knowledge_id = self.id_mapping[f"content_{content_item_id}"]
+            
+            if not knowledge_id:
+                continue
+            
+            # 获取用户ID
+            new_user_id = 1  # 默认用户ID
+            if f"user_{user_id}" in self.id_mapping:
+                new_user_id = self.id_mapping[f"user_{user_id}"]
+            
+            insert_sql = """
+            INSERT INTO knowledge_favorites (id, knowledge_id, user_id, created_time, deleted)
+            VALUES (%s, %s, %s, %s, %s)
+            """
+            
+            values = (
+                new_id,
+                knowledge_id,
+                new_user_id,
+                datetime.now(),
+                0
+            )
+            
+            mysql_cursor.execute(insert_sql, values)
+            
+        self.mysql_conn.commit()
+        print(f"✅ 收藏数据迁移完成: {len(favorites)} 条记录")
+    
+    def run_migration(self):
+        """运行完整迁移"""
+        print("🚀 开始历史系统数据迁移...")
+        
+        try:
+            # 连接数据库
+            self.connect_databases()
+            # 确保目标库新增字段已就绪
+            self.ensure_target_schema()
+            
+            # 按顺序迁移数据
+            self.migrate_users()
+            self.migrate_categories()
+            self.migrate_content()
+            self.migrate_uploads()
+            self.migrate_feedbacks()
+            self.migrate_favorites()
+            
+            print("\n✅ 数据迁移完成！")
+            print(f"📊 ID映射关系已保存，共 {len(self.id_mapping)} 个映射")
+            
+        except Exception as e:
+            print(f"❌ 迁移过程中出现错误: {e}")
+            if self.mysql_conn:
+                self.mysql_conn.rollback()
+        finally:
+            # 关闭连接
+            if self.sqlite_conn:
+                self.sqlite_conn.close()
+            if self.mysql_conn:
+                self.mysql_conn.close()
+
+def main():
+    # 配置
+    sqlite_db_path = input("请输入 SQLite 数据库文件路径: ").strip()
+    if not os.path.exists(sqlite_db_path):
+        print("❌ SQLite 数据库文件不存在！")
+        return
+    
+    mysql_config = {
+        'host': 'localhost',
+        'user': 'root',
+        'password': 'xmc131455',
+        'database': 'knowledge_base'
+    }
+    
+    # 运行迁移
+    migration = LegacyDataMigration(sqlite_db_path, mysql_config)
+    migration.run_migration()
+
+if __name__ == "__main__":
+    main()
