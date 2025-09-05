@@ -12,6 +12,7 @@ import re
 from datetime import datetime
 import os
 import sys
+import logging
 
 class LegacyDataMigration:
     def __init__(self, sqlite_db_path, mysql_config):
@@ -20,6 +21,7 @@ class LegacyDataMigration:
         self.mysql_conn = None
         self.sqlite_conn = None
         self.id_mapping = {}  # 存储旧ID到新ID的映射
+        logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
         
     def connect_databases(self):
         """连接数据库"""
@@ -76,6 +78,30 @@ class LegacyDataMigration:
         cur = self.sqlite_conn.cursor()
         cur.execute(f"PRAGMA table_info('{table_name}')")
         return {row[1] for row in cur.fetchall()}  # row[1] is column name
+    
+    def _clean_text(self, value, ctx: str):
+        """将文本清洗为安全的 utf-8 内容，并在发生修复时打印日志。"""
+        if value is None:
+            return None
+        if isinstance(value, (bytes, bytearray)):
+            for enc in ('utf-8', 'gbk', 'latin1'):
+                try:
+                    decoded = bytes(value).decode(enc)
+                    logging.warning(f"文本解码: {ctx} 使用 {enc} -> utf-8")
+                    return decoded
+                except Exception:
+                    continue
+            try:
+                return bytes(value).decode('utf-8', errors='replace')
+            except Exception:
+                return str(value)
+        try:
+            value.encode('utf-8')
+            return value
+        except Exception:
+            cleaned = value.encode('utf-8', errors='replace').decode('utf-8')
+            logging.warning(f"文本替换: {ctx} 存在非utf8字符，已安全替换。原长={len(value)} 清洗后={len(cleaned)}")
+            return cleaned
     
     def parse_path_to_hierarchy(self, path):
         """
@@ -255,6 +281,8 @@ class LegacyDataMigration:
         
         for content in contents:
             old_id, title, text, keywords, created, updated, expired, category_id = content
+            safe_title = self._clean_text(title, f"content.title(id={old_id})")
+            safe_text = self._clean_text(text, f"content.text(id={old_id})")
             
             # 生成新的ID
             mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM knowledge")
@@ -277,8 +305,8 @@ class LegacyDataMigration:
             
             values = (
                 new_id,
-                title or '',
-                text or '',
+                safe_title or '',
+                safe_text or '',
                 parent_id,
                 'doc',
                 json.dumps(tags, ensure_ascii=False),
@@ -290,8 +318,18 @@ class LegacyDataMigration:
                 0
             )
             
-            mysql_cursor.execute(insert_sql, values)
-            self.id_mapping[f"content_{old_id}"] = new_id
+            try:
+                mysql_cursor.execute(insert_sql, values)
+                self.id_mapping[f"content_{old_id}"] = new_id
+            except Exception as e:
+                # 打印问题数据，便于定位
+                preview = (safe_text or '')[:120]
+                print(f"❗ 内容写入失败 id={old_id}, new_id={new_id}, error={e}")
+                print(f"   title_len={len(safe_title or '')}, text_len={len(safe_text or '')}")
+                print(f"   title_preview={repr((safe_title or '')[:80])}")
+                print(f"   text_preview={repr(preview)}")
+                # 继续抛出以便上层回滚或终止
+                raise
             
         self.mysql_conn.commit()
         print(f"✅ 内容数据迁移完成: {len(contents)} 条记录")
