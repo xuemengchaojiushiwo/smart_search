@@ -43,6 +43,24 @@ public class ChatFeedbackController {
         return ApiResponse.success(null);
     }
 
+    @DeleteMapping("/answer/{sessionId}/{messageId}/like")
+    @Operation(summary = "取消点赞AI回答")
+    public ApiResponse<Void> unlikeAnswer(@PathVariable String sessionId,
+                                          @PathVariable String messageId,
+                                          @RequestParam(defaultValue = "1") Long userId) {
+        chatFeedbackService.unlikeAnswer(sessionId, messageId, userId);
+        return ApiResponse.success(null);
+    }
+
+    @DeleteMapping("/answer/{sessionId}/{messageId}/dislike")
+    @Operation(summary = "取消点踩AI回答")
+    public ApiResponse<Void> undislikeAnswer(@PathVariable String sessionId,
+                                             @PathVariable String messageId,
+                                             @RequestParam(defaultValue = "1") Long userId) {
+        chatFeedbackService.undislikeAnswer(sessionId, messageId, userId);
+        return ApiResponse.success(null);
+    }
+
     @Data
     private static class DislikeBody {
         private String content;

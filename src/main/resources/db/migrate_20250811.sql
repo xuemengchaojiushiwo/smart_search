@@ -33,3 +33,13 @@ ALTER TABLE attachments ADD COLUMN download_count INT DEFAULT 0 COMMENT '下载�
 
 
 
+-- 3) 新增 workspaces 表（用于维护可用的工作空间列表）
+CREATE TABLE IF NOT EXISTS workspaces (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    code VARCHAR(50) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT NULL,
+    created_time DATETIME NOT NULL DEFAULT NOW(),
+    KEY idx_ws_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+

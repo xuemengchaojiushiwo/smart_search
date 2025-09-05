@@ -1,5 +1,6 @@
 package com.knowledge.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.knowledge.entity.ChatFeedback;
 import com.knowledge.mapper.ChatFeedbackMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +37,36 @@ public class ChatFeedbackService {
         fb.setCreatedTime(LocalDateTime.now());
         fb.setDeleted(0);
         chatFeedbackMapper.insert(fb);
+    }
+
+    public void unlikeAnswer(String sessionId, String messageId, Long userId) {
+        LambdaQueryWrapper<ChatFeedback> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ChatFeedback::getSessionId, sessionId)
+               .eq(ChatFeedback::getMessageId, messageId)
+               .eq(ChatFeedback::getUserId, userId)
+               .eq(ChatFeedback::getAttitude, "like")
+               .eq(ChatFeedback::getDeleted, 0);
+        
+        ChatFeedback feedback = chatFeedbackMapper.selectOne(wrapper);
+        if (feedback != null) {
+            feedback.setDeleted(1);
+            chatFeedbackMapper.updateById(feedback);
+        }
+    }
+
+    public void undislikeAnswer(String sessionId, String messageId, Long userId) {
+        LambdaQueryWrapper<ChatFeedback> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ChatFeedback::getSessionId, sessionId)
+               .eq(ChatFeedback::getMessageId, messageId)
+               .eq(ChatFeedback::getUserId, userId)
+               .eq(ChatFeedback::getAttitude, "dislike")
+               .eq(ChatFeedback::getDeleted, 0);
+        
+        ChatFeedback feedback = chatFeedbackMapper.selectOne(wrapper);
+        if (feedback != null) {
+            feedback.setDeleted(1);
+            chatFeedbackMapper.updateById(feedback);
+        }
     }
 }
 

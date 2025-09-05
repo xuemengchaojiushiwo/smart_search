@@ -1300,6 +1300,7 @@ def store_chunks_to_es(chunks: List[Document], knowledge_id: int):
                 "page_num": chunk.metadata.get("page_num", 1),
                 "bbox": chunk.metadata.get("bbox", []),
                 "positions": chunk.metadata.get("positions", []),
+                "node_type": "doc",  # 明确标识这是文档类型
                 "weight": 1.0
             }
             
@@ -1327,8 +1328,9 @@ async def process_document(
     effective_time: str = Form(None)
 ):
     """
-    使用 PyMuPDF Pro + PyMuPDF4LLM 统一处理上传的文档
-    支持 PDF、Word、Excel、PowerPoint、TXT 等格式
+    处理上传的文档
+    - 支持切分的格式：PDF、Word、Excel、PowerPoint、TXT 等
+    - 不支持切分的格式：图片、音频、视频等（仅存储）
     """
     logger.info(f"开始处理文档: {file.filename}, 知识ID: {knowledge_id}")
     
@@ -1336,13 +1338,23 @@ async def process_document(
         # 检查文件类型
         file_extension = Path(file.filename).suffix.lower()
         
-        # PyMuPDF Pro 支持的文件类型
-        supported_extensions = {
+        # 支持切分的文件类型
+        chunkable_extensions = {
             ".pdf", ".docx", ".doc", ".xlsx", ".xls", 
             ".pptx", ".ppt", ".txt", ".hwp", ".hwpx"
         }
         
-        if file_extension not in supported_extensions:
+        # 支持存储但不切分的文件类型（图片、音频、视频等）
+        storage_only_extensions = {
+            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp",  # 图片
+            ".mp3", ".wav", ".flac", ".aac", ".ogg",  # 音频
+            ".mp4", ".avi", ".mov", ".wmv", ".flv", ".mkv",  # 视频
+            ".zip", ".rar", ".7z", ".tar", ".gz",  # 压缩包
+            ".exe", ".msi", ".dmg", ".deb", ".rpm",  # 可执行文件
+        }
+        
+        # 检查是否为支持的文件类型
+        if file_extension not in chunkable_extensions and file_extension not in storage_only_extensions:
             raise HTTPException(status_code=400, detail=f"不支持的文件类型: {file_extension}")
         
         # 保存上传的文件
@@ -1352,23 +1364,35 @@ async def process_document(
             temp_file_path = temp_file.name
         
         try:
-            # 处理文档
-            result = process_document_unified(
-                temp_file_path,
-                file.filename,
-                knowledge_id,
-                knowledge_name=knowledge_name,
-                description=description,
-                tags=tags,
-                effective_time=effective_time,
-            )
-            
-            return DocumentProcessResponse(
-                success=True,
-                message=f"文档处理成功: {file.filename}",
-                chunks_count=result["chunks_count"],
-                knowledge_id=int(knowledge_id) if knowledge_id is not None else 0
-            )
+            # 判断是否需要切分处理
+            if file_extension in chunkable_extensions:
+                # 进行文档切分处理
+                result = process_document_unified(
+                    temp_file_path,
+                    file.filename,
+                    knowledge_id,
+                    knowledge_name=knowledge_name,
+                    description=description,
+                    tags=tags,
+                    effective_time=effective_time,
+                )
+                
+                return DocumentProcessResponse(
+                    success=True,
+                    message=f"文档处理成功: {file.filename}",
+                    chunks_count=result["chunks_count"],
+                    knowledge_id=int(knowledge_id) if knowledge_id is not None else 0
+                )
+            else:
+                # 仅存储，不进行切分处理
+                logger.info(f"文件类型 {file_extension} 不支持切分，仅进行存储: {file.filename}")
+                
+                return DocumentProcessResponse(
+                    success=True,
+                    message=f"文件存储成功: {file.filename}（该文件类型不支持内容切分）",
+                    chunks_count=0,
+                    knowledge_id=int(knowledge_id) if knowledge_id is not None else 0
+                )
             
         finally:
             # 清理临时文件
@@ -1395,8 +1419,10 @@ def chat_with_rag(request: ChatRequest):
                 session_id=request.user_id
             )
         
-        # 构建过滤条件
-        filters = [{"exists": {"field": "embedding"}}]
+        # 构建过滤条件 - 简化过滤，先确保基本搜索能工作
+        filters = [
+            {"term": {"chunk_type": "content"}}  # 只搜索内容类型的chunk
+        ]
         
         # 如果指定了特定文件，则只检索该文件的chunks
         if request.source_file:

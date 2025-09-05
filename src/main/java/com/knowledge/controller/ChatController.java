@@ -1,6 +1,7 @@
 package com.knowledge.controller;
 
 import com.knowledge.dto.ChatRequest;
+import com.knowledge.dto.CreateSessionRequest;
 import com.alibaba.fastjson2.JSON;
 import com.knowledge.service.PythonService;
 import com.knowledge.vo.ChatSessionVO;
@@ -45,6 +46,55 @@ public class ChatController {
 
     @Autowired
     private com.knowledge.service.ChatPersistenceService chatPersistenceService;
+    
+    /**
+     * 创建RAG对话会话
+     */
+    @PostMapping("/sessions")
+    @Operation(summary = "创建RAG会话", description = "创建一个新的RAG对话会话，返回会话信息")
+    public ApiResponse<ChatSessionVO> createSession(
+            @Parameter(description = "创建会话请求", required = true) @Valid @RequestBody CreateSessionRequest request,
+            HttpServletRequest httpRequest) {
+
+        try {
+            String username = resolveUserId(httpRequest, request.getUserId());
+
+            // 生成会话ID
+            String sessionId = request.getSessionId();
+            if (sessionId == null || sessionId.isEmpty()) {
+                sessionId = UUID.randomUUID().toString();
+            }
+
+            log.info("创建RAG会话 - 用户: {}, 会话: {}", username, sessionId);
+
+            // 确保创建会话并记录到数据库
+            chatHistoryService.createSessionIfAbsent(sessionId, username);
+            chatPersistenceService.ensureSession(sessionId, username);
+
+            // 创建会话VO
+            ChatSessionVO session = new ChatSessionVO();
+            session.setSessionId(sessionId);
+            session.setSessionName(request.getSessionName());
+            session.setDescription(request.getDescription());
+            // 转换知识ID列表类型
+            if (request.getKnowledgeIds() != null) {
+                List<Long> knowledgeIdLongs = request.getKnowledgeIds().stream()
+                    .map(Long::valueOf)
+                    .collect(java.util.stream.Collectors.toList());
+                session.setKnowledgeIds(knowledgeIdLongs);
+            }
+            session.setCreatedBy(username);
+            session.setStatus("ACTIVE");
+
+            log.info("RAG会话创建成功 - 用户: {}, 会话: {}", username, sessionId);
+
+            return ApiResponse.success(session);
+
+        } catch (Exception e) {
+            log.error("创建会话失败: {}", e.getMessage(), e);
+            return ApiResponse.error("创建会话失败: " + e.getMessage());
+        }
+    }
     
 //     /**
 //      * 创建RAG对话会话

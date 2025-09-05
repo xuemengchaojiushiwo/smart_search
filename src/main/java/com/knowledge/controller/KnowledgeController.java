@@ -148,6 +148,7 @@ public class KnowledgeController {
         result.put("parentId", knowledge.getParentId());
         result.put("nodeType", knowledge.getNodeType());
         result.put("tags", knowledge.getTags());
+        result.put("tableData", knowledge.getTableData()); // 添加表格数据字段
         result.put("effectiveStartTime", knowledge.getEffectiveStartTime());
         result.put("effectiveEndTime", knowledge.getEffectiveEndTime());
         result.put("status", knowledge.getStatus());

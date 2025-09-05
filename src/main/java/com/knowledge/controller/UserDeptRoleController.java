@@ -2,7 +2,6 @@ package com.knowledge.controller;
 
 import com.knowledge.entity.UserDeptRole;
 import com.knowledge.enums.Department;
-import com.knowledge.enums.DeptRole;
 import com.knowledge.service.UserDeptRoleService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -32,13 +31,34 @@ public class UserDeptRoleController {
         return service.listByDept(dept);
     }
 
-    @PutMapping("/{userId}/dept-roles")
-    public UserDeptRole upsert(@PathVariable Long userId, @RequestBody UpdateRoleReq req) {
-        return service.upsert(userId, req.getDept(), req.getRole());
+//     @PutMapping("/{userId}/dept-roles")
+//     public UserDeptRole upsert(@PathVariable Long userId, @RequestBody UpdateRoleReq req) {
+//         return service.upsert(userId, req.getDept(), req.getRole());
+//     }
+
+    @PostMapping("/{userId}/dept")
+    public UserDeptRole updateDept(@PathVariable Long userId, @RequestBody UpdateDeptReq req) {
+        return service.updateDept(userId, req.getDept());
+    }
+
+    @PostMapping("/{userId}/role")
+    public UserDeptRole updateRole(@PathVariable Long userId, @RequestBody UpdateRoleOnlyReq req) {
+        return service.updateRole(userId, req.getDept(), req.getRole());
     }
 
     @Data
     public static class UpdateRoleReq {
+        private String dept;
+        private String role;
+    }
+
+    @Data
+    public static class UpdateDeptReq {
+        private String dept;
+    }
+
+    @Data
+    public static class UpdateRoleOnlyReq {
         private String dept;
         private String role;
     }

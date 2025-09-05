@@ -1,6 +1,7 @@
 package com.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.knowledge.dto.FavoriteStatusDTO;
 import com.knowledge.dto.UserFavoriteDTO;
 import com.knowledge.entity.Knowledge;
@@ -81,8 +82,11 @@ public class EngagementService {
 		w.eq(KnowledgeFavorite::getKnowledgeId, knowledgeId).eq(KnowledgeFavorite::getUserId, userId).eq(KnowledgeFavorite::getDeleted, 0);
 		KnowledgeFavorite f = favoriteMapper.selectOne(w);
 		if (f != null) {
-			f.setDeleted(1);
-			favoriteMapper.updateById(f);
+			// 使用 LambdaUpdateWrapper 来确保 deleted 字段被更新
+			LambdaUpdateWrapper<KnowledgeFavorite> updateWrapper = new LambdaUpdateWrapper<>();
+			updateWrapper.eq(KnowledgeFavorite::getId, f.getId())
+					.set(KnowledgeFavorite::getDeleted, 1);
+			favoriteMapper.update(null, updateWrapper);
 		}
 	}
 

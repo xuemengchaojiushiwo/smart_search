@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS users (
     staffid VARCHAR(50) UNIQUE NOT NULL COMMENT '工号',
     email VARCHAR(100) UNIQUE NULL COMMENT '邮箱',
     role VARCHAR(20) NULL COMMENT '兼容旧字段',
+    display_name VARCHAR(150) NULL COMMENT '显示名称',
+    profile_picture VARCHAR(255) NULL COMMENT '头像URL',
+    password VARCHAR(255) NULL COMMENT '密码(迁移保留)',
+    last_login DATETIME NULL COMMENT '上次登录时间',
+    date_joined DATETIME NULL COMMENT '注册时间(迁移保留)',
     staff_role VARCHAR(50) NULL COMMENT '员工角色(ldap)',
     system_role VARCHAR(50) NULL COMMENT '系统角色',
     workspace VARCHAR(200) NULL COMMENT '可管理的workspace(逗号分隔)',
@@ -185,5 +190,15 @@ CREATE TABLE IF NOT EXISTS user_dept_role (
     user_id BIGINT NOT NULL,
     dept VARCHAR(50) NOT NULL,
     role VARCHAR(50) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 工作空间表
+CREATE TABLE IF NOT EXISTS workspaces (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    code VARCHAR(50) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT NULL,
+    created_time DATETIME NOT NULL DEFAULT NOW(),
+    KEY idx_ws_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -67,6 +67,16 @@ public class ChatPersistenceService {
         if (s2 != null) {
             s2.setMessageCount((s2.getMessageCount() == null ? 0 : s2.getMessageCount()) + 1);
             s2.setLastActiveTime(LocalDateTime.now());
+            // 若会话标题为空，且当前为用户的首条问题，则用问题作为标题（截断至30字符）
+            if ((s2.getSessionName() == null || s2.getSessionName().isEmpty()) && "user".equals(role)) {
+                String title = content == null ? "" : content.trim();
+                if (!title.isEmpty()) {
+                    if (title.length() > 30) {
+                        title = title.substring(0, 30) + "...";
+                    }
+                    s2.setSessionName(title);
+                }
+            }
             chatSessionMapper.updateById(s2);
         }
     }

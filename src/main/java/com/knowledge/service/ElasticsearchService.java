@@ -259,12 +259,15 @@ public class ElasticsearchService {
                     .field("author", 1.0f)           // 作者
                     .type(MultiMatchQueryBuilder.Type.BEST_FIELDS);
 
-            // 过滤条件：仅返回包含 source.id 的文档（知识元数据），排除chunk文档
+            // 过滤条件：搜索知识元数据文档，排除chunk文档
             org.elasticsearch.index.query.BoolQueryBuilder boolQuery = QueryBuilders.boolQuery()
                     .must(multiMatchQuery)
-                    .filter(QueryBuilders.existsQuery("id"));
+                    .filter(QueryBuilders.existsQuery("id"))  // 必须有id字段（知识元数据）
+                    .filter(QueryBuilders.existsQuery("title")); // 必须有title字段（知识元数据）
+            
             if (allowedWorkspaces != null && !allowedWorkspaces.isEmpty()) {
-                boolQuery.filter(QueryBuilders.termsQuery("workspaces", allowedWorkspaces));
+                boolQuery.filter(QueryBuilders.termsQuery("workspaces.keyword", allowedWorkspaces));
+                log.info("添加工作空间过滤: {}", allowedWorkspaces);
             }
 
             searchSourceBuilder.query(boolQuery);
@@ -280,7 +283,9 @@ public class ElasticsearchService {
             searchRequest.source(searchSourceBuilder);
 
             // 执行搜索
+            log.info("执行ES搜索，查询: {}, 工作空间过滤: {}", query, allowedWorkspaces);
             SearchResponse response = elasticsearchClient.search(searchRequest, RequestOptions.DEFAULT);
+            log.info("ES搜索响应，总命中数: {}", response.getHits().getTotalHits().value);
 
             // 解析结果
             List<ElasticsearchResultVO> results = new ArrayList<>();
@@ -344,6 +349,9 @@ public class ElasticsearchService {
             }
 
             log.info("搜索完成，关键词: {}, 结果数量: {}", query, results.size());
+            if (results.isEmpty()) {
+                log.warn("ES搜索返回空结果，查询: {}, 工作空间: {}", query, allowedWorkspaces);
+            }
             return results;
 
         } catch (IOException e) {
@@ -375,7 +383,7 @@ public class ElasticsearchService {
                     .must(multiMatchQuery)
                     .filter(QueryBuilders.existsQuery("id"));
             if (allowedWorkspaces != null && !allowedWorkspaces.isEmpty()) {
-                boolQuery.filter(QueryBuilders.termsQuery("workspaces", allowedWorkspaces));
+                boolQuery.filter(QueryBuilders.termsQuery("workspaces.keyword", allowedWorkspaces));
             }
 
             searchSourceBuilder.query(boolQuery);

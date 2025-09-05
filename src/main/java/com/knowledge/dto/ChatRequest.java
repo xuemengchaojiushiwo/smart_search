@@ -17,9 +17,6 @@ public class ChatRequest {
     // 会话ID，用于连续对话
     private String sessionId;
     
-    // 指定知识库ID列表，用于RAG对话
-    private List<Long> knowledgeIds;
-    
     // 是否流式响应
     private Boolean stream = false;
     
