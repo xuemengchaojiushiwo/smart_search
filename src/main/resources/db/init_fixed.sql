@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS knowledge (
     download_count INT DEFAULT 0 COMMENT '下载次数',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
+CREATE TABLE IF NOT EXISTS search_history ( id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL COMMENT '用户ID', query VARCHAR(500) NOT NULL COMMENT '搜索关键词', search_time DATETIME NOT NULL DEFAULT NOW() COMMENT '搜索时间', result_count INT COMMENT '结果数量', deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识' ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- 知识-工作空间 关联表（多对多）
 CREATE TABLE IF NOT EXISTS knowledge_workspace (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,

@@ -26,7 +26,7 @@ public class PythonService {
      */
     public Map<String, Object> validateLdapUser(String username, String password) {
         try {
-            String url = pythonServiceUrl + "/api/ldap/validate";
+            String url = pythonServiceUrl + "/ldap/verify";
             
             Map<String, String> requestBody = new HashMap<>();
             requestBody.put("username", username);
@@ -40,6 +40,7 @@ public class PythonService {
             ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
             
             if (response.getStatusCode() == HttpStatus.OK) {
+                @SuppressWarnings("unchecked")
                 Map<String, Object> result = JSON.parseObject(response.getBody(), Map.class);
                 log.info("LDAP验证成功: {}", username);
                 return result;
@@ -72,6 +73,7 @@ public class PythonService {
             ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
             
             if (response.getStatusCode() == HttpStatus.OK) {
+                @SuppressWarnings("unchecked")
                 Map<String, Object> result = JSON.parseObject(response.getBody(), Map.class);
                 log.info("普通对话成功: {}", question);
                 return result;
@@ -115,6 +117,7 @@ public class PythonService {
             ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
             
             if (response.getStatusCode() == HttpStatus.OK) {
+                @SuppressWarnings("unchecked")
                 Map<String, Object> result = JSON.parseObject(response.getBody(), Map.class);
                 log.info("RAG对话成功: {} {}", question, sourceFile != null ? "(文件: " + sourceFile + ")" : "");
                 return result;
@@ -162,6 +165,7 @@ public class PythonService {
             ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
 
             if (response.getStatusCode() == HttpStatus.OK) {
+                @SuppressWarnings("unchecked")
                 Map<String, Object> result = JSON.parseObject(response.getBody(), Map.class);
                 log.info("文档处理成功: {}", file.getOriginalFilename());
                 return result;
@@ -185,6 +189,7 @@ public class PythonService {
             ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
             
             if (response.getStatusCode() == HttpStatus.OK) {
+                @SuppressWarnings("unchecked")
                 Map<String, Object> result = JSON.parseObject(response.getBody(), Map.class);
                 log.info("Python服务健康检查成功");
                 return result;

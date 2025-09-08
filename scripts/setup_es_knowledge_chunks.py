@@ -2,15 +2,22 @@
 # -*- coding: utf-8 -*-
 """
 一键创建/重建 ES 索引（knowledge_chunks），用于存储"知识+附件"分块
-- 支持 dense_vector(1536)
+- 支持 dense_vector(可配置 EMBEDDING_DIMS，默认 1536)
 - 支持页码、位置（char_start/char_end）、元信息块（knowledge_meta）
 """
 import requests
 import json
+import sys
+import os
 
-ES_BASE = "http://localhost:9200"
-INDEX = "knowledge_base_new"  # 使用新名称避免冲突
-AUTH = ("elastic", "password")
+# 添加python_service目录到路径，以便导入config
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'python_service'))
+
+from config import EMBEDDING_DIMS, ES_CONFIG
+
+ES_BASE = f"http://{ES_CONFIG['host']}:{ES_CONFIG['port']}"
+INDEX = ES_CONFIG['index']
+AUTH = (ES_CONFIG['username'], ES_CONFIG['password'])
 
 mapping = {
     "settings": {
@@ -34,7 +41,7 @@ mapping = {
             "bbox": {"type": "float"},  # 新的边界框字段 [x0, y0, x1, y1]
             "positions": {"type": "object", "enabled": False},  # 新的位置信息字段
             "content": {"type": "text"},
-            "embedding": {"type": "dense_vector", "dims": 1536}
+            "embedding": {"type": "dense_vector", "dims": EMBEDDING_DIMS}
         }
     }
 }

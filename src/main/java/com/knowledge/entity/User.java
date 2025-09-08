@@ -21,6 +21,10 @@ public class User {
 
     private String email;
 
+    // 显示名称（LDAP返回）
+    @TableField("display_name")
+    private String displayName;
+
     // 系统角色（用于鉴权）。为兼容旧逻辑，仍保留 role 字段
     private String role;
 
@@ -34,6 +38,10 @@ public class User {
 
     // 工作空间（逗号分隔）
     private String workspace;
+    
+    // 最后登录时间
+    @TableField("last_login")
+    private LocalDateTime lastLogin;
     
     private Integer status;
     

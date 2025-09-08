@@ -2,12 +2,16 @@
 import os
 import json
 from pathlib import Path
+import os
 
 # Elasticsearch配置
+EMBEDDING_DIMS = 1536  # 默认1536维，切换自定义API时改为1024
+ES_INDEX = f'knowledge_base_new_{EMBEDDING_DIMS}'
+
 ES_CONFIG = {
     'host': 'localhost',
     'port': 9200,
-    'index': 'knowledge_base_new',  # 更新索引名称
+    'index': ES_INDEX,
     'username': 'elastic',
     'password': 'password',
     'verify_certs': False
@@ -52,7 +56,7 @@ DOCUMENT_CONFIG = {
 # Embedding模型配置
 EMBEDDING_CONFIG = {
     "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-    "device": "cpu"
+    "device": "cpu",
 }
 
 # RAG配置

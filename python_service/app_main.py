@@ -70,6 +70,7 @@ app = FastAPI(title="智能知识库系统", version="2.0.0")
 # 导入配置
 from config import (
     ES_CONFIG, DOCUMENT_CONFIG, EMBEDDING_CONFIG, RAG_CONFIG,
+    EMBEDDING_DIMS,
     CHUNKING_CONFIG, GEEKAI_API_KEY, GEEKAI_CHAT_URL,
     GEEKAI_EMBEDDING_URL, DEFAULT_EMBEDDING_MODEL
 )
@@ -787,6 +788,32 @@ def validate_ldap_user(request: LdapValidateRequest):
             message="用户名或密码错误"
         )
 
+@app.post("/ldap/verify")
+def ldap_verify(request: LdapValidateRequest):
+    """LDAP验证接口，供Java调用"""
+    username = request.username.strip()
+    password = request.password
+    
+    # 模拟验证（可以后续集成真实LDAP）
+    if not username or not password:
+        raise HTTPException(status_code=401, detail="用户名或密码不能为空")
+    
+    # 模拟用户信息
+    user_info = {
+        "username": username,
+        "email": f"{username}@example.com",
+        "display_name": username.capitalize(),
+        "role": "USER",
+        "system_role": "USER",
+    }
+    
+    return {
+        "ok": True,
+        "source": "mock",
+        "user": user_info,
+        "raw": {}
+    }
+
 def process_document_unified(
     file_path: str,
     filename: str,
@@ -1283,6 +1310,14 @@ def store_chunks_to_es(chunks: List[Document], knowledge_id: int):
             chunk_embedding = get_embedding(chunk.page_content)
             if not chunk_embedding:
                 logger.warning(f"Chunk {i} embedding生成失败，跳过")
+                continue
+            # 校验 embedding 维度与配置一致（自定义API切换成1024时避免落错索引）
+            try:
+                emb_len = len(chunk_embedding) if chunk_embedding is not None else 0
+            except Exception:
+                emb_len = 0
+            if emb_len != EMBEDDING_DIMS:
+                logger.error(f"Chunk {i} embedding 维度不匹配: got={emb_len}, expected={EMBEDDING_DIMS}，已跳过入库")
                 continue
             
             # 准备ES文档

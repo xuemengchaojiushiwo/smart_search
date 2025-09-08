@@ -4,6 +4,7 @@ import com.knowledge.dto.ChatRequest;
 import com.knowledge.dto.CreateSessionRequest;
 import com.alibaba.fastjson2.JSON;
 import com.knowledge.service.PythonService;
+import com.knowledge.util.SecurityUtils;
 import com.knowledge.vo.ChatSessionVO;
 import com.knowledge.vo.ChatMessageVO;
 import com.knowledge.vo.ApiResponse;
@@ -450,16 +451,19 @@ public class ChatController {
 //    }
 
     /**
-     * 统一解析当前请求的 userId：优先请求体传入的 userId，其次请求头 X-User-Id，最后退回默认用户名
+     * 统一解析当前请求的 userId：优先请求体传入的 userId，其次从JWT认证获取，最后退回默认用户名
      */
     private String resolveUserId(HttpServletRequest request, String bodyUserId) {
         if (bodyUserId != null && !bodyUserId.isEmpty()) {
             return bodyUserId;
         }
-        String headerUser = request.getHeader("X-User-Id");
-        if (headerUser != null && !headerUser.isEmpty()) {
-            return headerUser;
+        
+        // 从JWT认证中获取当前用户
+        String currentUser = SecurityUtils.getCurrentUsername();
+        if (currentUser != null && !currentUser.isEmpty()) {
+            return currentUser;
         }
+        
         return extractUsername(request);
     }
 }

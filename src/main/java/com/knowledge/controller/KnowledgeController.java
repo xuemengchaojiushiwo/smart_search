@@ -5,6 +5,7 @@ import com.knowledge.dto.KnowledgeDTO;
 import com.knowledge.entity.Attachment;
 import com.knowledge.entity.Knowledge;
 import com.knowledge.service.KnowledgeService;
+import com.knowledge.util.SecurityUtils;
 import com.knowledge.vo.ApiResponse;
 import com.knowledge.vo.KnowledgeVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -69,11 +70,18 @@ public class KnowledgeController {
         return null;
     }
 
-    // 简化：从头部兼容获取用户ID
+    // 从JWT认证获取用户ID
     private String resolveUserIdFromHeader(javax.servlet.http.HttpServletRequest request) {
+        // 从JWT认证中获取当前用户
+        String currentUser = SecurityUtils.getCurrentUsername();
+        if (currentUser != null && !currentUser.isEmpty()) {
+            return currentUser;
+        }
+        
+        // 兼容旧的头信息
         String uid = request.getHeader("X-User-Id");
         if (uid != null && !uid.isEmpty()) return uid;
-        return null; // 可扩展JWT解析
+        return null;
     }
     
     @PostMapping
