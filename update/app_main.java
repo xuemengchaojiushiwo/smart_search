@@ -71,9 +71,11 @@ app = FastAPI(title="智能知识库系统", version="2.0.0")
 from config import (
     ES_CONFIG, DOCUMENT_CONFIG, EMBEDDING_CONFIG, RAG_CONFIG,
     EMBEDDING_DIMS,
-    CHUNKING_CONFIG, GEEKAI_API_KEY, GEEKAI_CHAT_URL,
-    GEEKAI_EMBEDDING_URL, DEFAULT_EMBEDDING_MODEL
+    CHUNKING_CONFIG, DEFAULT_EMBEDDING_MODEL
 )
+
+# 导入AI客户端管理器
+from ai_client_manager import get_ai_manager
 from fastapi.responses import FileResponse
 
 # 辅助：构建页文本与词级索引（用于bbox定位）
@@ -145,28 +147,27 @@ es_client = Elasticsearch(
     verify_certs=ES_CONFIG['verify_certs']
 )
 
-# 极客API embedding函数
+# AI API embedding函数
 def get_embedding(text: str) -> list:
-    """使用极客API获取文本嵌入向量"""
+    """使用AI管理器获取文本嵌入向量"""
     try:
-        url = GEEKAI_EMBEDDING_URL
-        headers = {
-            "Authorization": f"Bearer {GEEKAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": DEFAULT_EMBEDDING_MODEL,
-            "input": [text],
-            "intent": "search_document"
-        }
-        response = requests.post(url, headers=headers, json=data, timeout=20)
-        if response.status_code == 200:
-            return response.json().get("data", [{}])[0].get("embedding")
-        else:
-            logger.error(f"极客API embedding失败: {response.status_code} - {response.text}")
+        manager = get_ai_manager()
+        result = manager.get_embeddings([text])
+        
+        if "error" in result:
+            logger.error(f"AI API embedding失败: {result['error']}")
             return None
+            
+        if "data" in result and len(result["data"]) > 0:
+            embedding = result["data"][0].get("embedding", [])
+            logger.info(f"AI API embedding成功，维度: {len(embedding)}")
+            return embedding
+        else:
+            logger.error("AI API embedding返回数据格式错误")
+            return None
+            
     except Exception as e:
-        logger.error(f"极客API embedding异常: {e}")
+        logger.error(f"AI API embedding异常: {e}")
         return None
 
 # 请求模型
@@ -1626,59 +1627,43 @@ def build_enhanced_rag_prompt(question: str, context_chunks: List[Dict]) -> str:
 
 def generate_ai_answer(prompt: str) -> str:
     """
-    调用大模型生成答案
+    调用AI管理器生成答案
     """
     try:
-        # 调用极客智坊API生成答案
-        headers = {
-            "Authorization": f"Bearer {GEEKAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
+        manager = get_ai_manager()
         
-        payload = {
-            "model": "gpt-4o-mini",  # 使用合适的模型
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "你是一个专业的文档知识助手，请基于提供的文档信息准确回答问题。"
-                },
-                {
-                    "role": "user", 
-                    "content": prompt
-                }
-            ],
-            "max_tokens": 1000,
-            "temperature": 0.3
-        }
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一个专业的文档知识助手，请基于提供的文档信息准确回答问题。"
+            },
+            {
+                "role": "user", 
+                "content": prompt
+            }
+        ]
         
-        response = requests.post(
-            GEEKAI_CHAT_URL,
-            headers=headers,
-            json=payload,
-            timeout=30
+        result = manager.chat_completion(
+            messages=messages,
+            max_tokens=1000,
+            temperature=0.3
         )
         
-        if response.status_code == 200:
-            result = response.json()
-            if "choices" in result and len(result["choices"]) > 0:
-                answer = result["choices"][0]["message"]["content"]
-                return answer
-            else:
-                logger.error(f"API响应格式异常: {result}")
-                return "抱歉，生成答案时出现格式错误，请重试。"
-        else:
-            logger.error(f"API调用失败: {response.status_code}, {response.text}")
-            return f"抱歉，API调用失败（状态码：{response.status_code}），请重试。"
+        if "error" in result:
+            logger.error(f"AI API调用失败: {result['error']}")
+            return f"抱歉，AI API调用失败：{result['error']}，请重试。"
             
-    except requests.exceptions.Timeout:
-        logger.error("API调用超时")
-        return "抱歉，生成答案超时，请重试。"
-    except requests.exceptions.RequestException as e:
-        logger.error(f"API请求异常: {e}")
-        return f"抱歉，API请求异常：{str(e)}，请重试。"
+        if "choices" in result and len(result["choices"]) > 0:
+            answer = result["choices"][0]["message"]["content"]
+            logger.info("AI API调用成功")
+            return answer
+        else:
+            logger.error(f"AI API响应格式异常: {result}")
+            return "抱歉，生成答案时出现格式错误，请重试。"
+            
     except Exception as e:
-        logger.error(f"生成AI答案失败: {e}")
-        return f"抱歉，生成答案时出现错误：{str(e)}，请重试。"
+        logger.error(f"生成答案时发生错误: {e}")
+        return f"抱歉，生成答案时发生错误：{str(e)}，请重试。"
 
 def extract_keywords_from_content(content: str) -> List[str]:
     """从内容提取关键标识词（通用版本）"""
@@ -1711,19 +1696,22 @@ def health_check():
         # 检查PyMuPDF可用性
         pymupdf_status = "available" if PYMUPDF_AVAILABLE else "unavailable"
         
-        # 检查极客智坊API
+        # 检查AI API状态
         try:
-            headers = {"Authorization": f"Bearer {GEEKAI_API_KEY}"}
-            response = requests.get("https://geekai.co/api/v1/models", headers=headers, timeout=5)
-            geekai_status = "available" if response.status_code == 200 else "unavailable"
+            manager = get_ai_manager()
+            api_info = manager.get_api_info()
+            ai_api_status = "available" if api_info["current_api"] else "unavailable"
+            current_api = api_info["current_api"]
         except:
-            geekai_status = "unavailable"
+            ai_api_status = "unavailable"
+            current_api = "unknown"
         
         return {
             "status": "healthy",
             "elasticsearch": "connected",
             "pymupdf": pymupdf_status,
-            "geekai_api": geekai_status,
+            "ai_api": ai_api_status,
+            "current_api": current_api,
             "timestamp": "2024-01-01T00:00:00Z"
         }
     except Exception as e:
