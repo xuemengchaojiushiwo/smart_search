@@ -2,6 +2,7 @@ package com.knowledge.controller;
 
 import com.knowledge.dto.SearchRequest;
 import com.knowledge.service.SearchService;
+import com.knowledge.util.SecurityUtils;
 import com.knowledge.vo.SearchResultVO;
 import com.knowledge.vo.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -27,9 +28,15 @@ public class SearchController {
     @Operation(summary = "搜索知识", description = "根据关键词搜索知识")
     public ApiResponse<SearchResultVO> search(
             @Parameter(description = "搜索请求", required = true) @Valid @RequestBody SearchRequest request) {
-        // 只查ES，异常让全局异常处理
-        log.info("搜索知识: {}", request.getQuery());
-        SearchResultVO result = searchService.searchKnowledge(request, 1L);
+        // 获取当前登录用户ID
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            log.warn("无法获取当前用户ID，使用默认值1");
+            userId = 1L;
+        }
+        
+        log.info("搜索知识: {}, userId: {}", request.getQuery(), userId);
+        SearchResultVO result = searchService.searchKnowledge(request, userId);
         return ApiResponse.success(result);
     }
     
@@ -46,9 +53,15 @@ public class SearchController {
     @Operation(summary = "获取推荐问题", description = "获取推荐的问题列表")
     public ApiResponse<List<String>> getRecommendations(
             @Parameter(description = "返回数量", example = "3") @RequestParam(defaultValue = "3") int limit) {
-        log.info("获取推荐问题: limit={}", limit);
-        // 暂时写死用户ID
-        List<String> recommendations = searchService.getRecommendations(1L, limit);
+        // 获取当前登录用户ID
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            log.warn("无法获取当前用户ID，使用默认值1");
+            userId = 1L;
+        }
+        
+        log.info("获取推荐问题: limit={}, userId={}", limit, userId);
+        List<String> recommendations = searchService.getRecommendations(userId, limit);
         return ApiResponse.success(recommendations);
     }
 } 

@@ -19,5 +19,17 @@ public class LoginResponse {
         private String username;
         private String email;
         private String role;
+        private String displayName;
+        private String staffId;
+        private String staffRole;
+        private String systemRole;
+        private String workspace;
+        private java.util.List<DeptRoleVO> departments;
+    }
+    
+    @Data
+    public static class DeptRoleVO {
+        private String dept;
+        private String role;
     }
 }

@@ -47,9 +47,21 @@ public class SearchService {
 
     // 搜索知识
     public SearchResultVO searchKnowledge(SearchRequest request, Long userId) {
-        // 记录搜索历史
+        // 记录搜索历史 - 使用staffid作为userId
         SearchHistory history = new SearchHistory();
-        history.setUserId(userId);
+        // 获取用户的staffid
+        com.knowledge.entity.User user = userService.getById(userId);
+        if (user != null && user.getStaffId() != null) {
+            // 将staffid转换为Long类型存储到userId字段
+            try {
+                history.setUserId(Long.valueOf(user.getStaffId()));
+            } catch (NumberFormatException e) {
+                // 如果staffid不是数字，使用数据库ID作为fallback
+                history.setUserId(userId);
+            }
+        } else {
+            history.setUserId(userId);
+        }
         history.setQuery(request.getQuery());
         history.setSearchTime(LocalDateTime.now());
         searchHistoryService.save(history);
@@ -259,8 +271,20 @@ public class SearchService {
 
     // 获取推荐问题
     public List<String> getRecommendations(Long userId, int limit) {
+        // 获取用户的staffid用于查询搜索历史
+        Long searchUserId = userId;
+        com.knowledge.entity.User user = userService.getById(userId);
+        if (user != null && user.getStaffId() != null) {
+            try {
+                searchUserId = Long.valueOf(user.getStaffId());
+            } catch (NumberFormatException e) {
+                // 如果staffid不是数字，使用原userId
+                searchUserId = userId;
+            }
+        }
+        
         // 先获取用户个人推荐
-        List<String> userRecommendations = searchHistoryService.getUserRecommendations(userId, limit);
+        List<String> userRecommendations = searchHistoryService.getUserRecommendations(searchUserId, limit);
 
         if (userRecommendations.size() >= limit) {
             return userRecommendations.subList(0, limit);

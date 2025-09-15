@@ -29,4 +29,14 @@ public class SearchHistoryService extends ServiceImpl<SearchHistoryMapper, Searc
     public List<String> getSuggestionsFromHistory(String query, int limit) {
         return baseMapper.selectSuggestionsFromHistory(query, limit);
     }
+    
+    // 获取用户搜索统计
+    public Integer getUserSearchCount(Long userId) {
+        return baseMapper.selectUserSearchCount(userId);
+    }
+    
+    // 获取最近搜索记录
+    public List<SearchHistory> getRecentSearches(Long userId, int limit) {
+        return baseMapper.selectRecentSearches(userId, limit);
+    }
 }

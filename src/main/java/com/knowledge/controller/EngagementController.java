@@ -5,8 +5,8 @@ import com.knowledge.enums.FeedbackType;
 import com.knowledge.service.EngagementService;
 import com.knowledge.vo.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -65,12 +65,13 @@ public class EngagementController {
 	@Operation(summary = "提交反馈")
 	public ApiResponse<Void> feedback(
 			@PathVariable Long knowledgeId,
-			@Parameter(description = "反馈内容") @RequestParam(required = false) String content,
-			@Parameter(description = "反馈类型(out_of_date|unclear|not_relevant)") @RequestParam(required = false, name = "feedbackType") String feedbackType,
-			@RequestParam(defaultValue = "1") Long userId) {
-		engagementService.feedback(knowledgeId, userId, content, feedbackType);
+			@RequestBody FeedbackRequest request) {
+		log.info("收到反馈请求: knowledgeId={}, userId={}, content={}, feedbackType={}", 
+				knowledgeId, request.getUserId(), request.getContent(), request.getFeedbackType());
+		engagementService.feedback(knowledgeId, request.getUserId(), request.getContent(), request.getFeedbackType());
 		return ApiResponse.success(null);
 	}
+
 
 	@GetMapping("/feedbacks")
 	@Operation(summary = "反馈列表")
@@ -104,6 +105,13 @@ public class EngagementController {
 			@PathVariable Long knowledgeId,
 			@RequestParam(defaultValue = "1") Long userId) {
 		return ApiResponse.success(engagementService.getFavoriteStatus(knowledgeId, userId));
+	}
+
+	@Data
+	public static class FeedbackRequest {
+		private Long userId;
+		private String content;
+		private String feedbackType;
 	}
 }
 

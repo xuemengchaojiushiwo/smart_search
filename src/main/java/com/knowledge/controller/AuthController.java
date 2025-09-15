@@ -2,7 +2,9 @@ package com.knowledge.controller;
 
 import com.knowledge.dto.LoginRequest;
 import com.knowledge.entity.User;
+import com.knowledge.entity.UserDeptRole;
 import com.knowledge.service.UserService;
+import com.knowledge.service.UserDeptRoleService;
 import com.knowledge.util.JwtTokenProvider;
 import com.knowledge.vo.ApiResponse;
 import com.knowledge.vo.LoginResponse;
@@ -14,6 +16,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 用户认证控制器 */
@@ -25,6 +29,9 @@ public class AuthController {
 
     @Autowired
     private UserService userService;
+
+    @Autowired
+    private UserDeptRoleService userDeptRoleService;
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
@@ -42,6 +49,17 @@ public class AuthController {
         String roleForToken = user.getSystemRole() != null ? user.getSystemRole() : user.getRole();
         String token = jwtTokenProvider.generateToken(user.getUsername(), roleForToken);
 
+        // 获取用户部门角色信息
+        List<UserDeptRole> userDeptRoles = userDeptRoleService.listByUser(user.getId());
+        List<LoginResponse.DeptRoleVO> departments = userDeptRoles.stream()
+                .map(deptRole -> {
+                    LoginResponse.DeptRoleVO deptRoleVO = new LoginResponse.DeptRoleVO();
+                    deptRoleVO.setDept(deptRole.getDept());
+                    deptRoleVO.setRole(deptRole.getRole());
+                    return deptRoleVO;
+                })
+                .collect(Collectors.toList());
+
         // 构建响应
         LoginResponse response = new LoginResponse();
         response.setSuccess(true);
@@ -53,6 +71,12 @@ public class AuthController {
         userVO.setUsername(user.getUsername());
         userVO.setEmail(user.getEmail());
         userVO.setRole(roleForToken);
+        userVO.setDisplayName(user.getDisplayName());
+        userVO.setStaffId(user.getStaffId());
+        userVO.setStaffRole(user.getStaffRole());
+        userVO.setSystemRole(user.getSystemRole());
+        userVO.setWorkspace(user.getWorkspace());
+        userVO.setDepartments(departments);
         response.setUser(userVO);
 
         return ApiResponse.success("登录成功", response);

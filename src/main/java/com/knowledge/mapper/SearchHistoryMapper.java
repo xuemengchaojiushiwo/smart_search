@@ -34,4 +34,15 @@ public interface SearchHistoryMapper extends BaseMapper<SearchHistory> {
             "WHERE deleted = 0 AND query LIKE CONCAT(#{query}, '%') " +
             "GROUP BY query ORDER BY COUNT(*) DESC, MAX(search_time) DESC LIMIT #{limit}")
     List<String> selectSuggestionsFromHistory(@Param("query") String query, @Param("limit") Integer limit);
+    
+    // 获取用户搜索统计
+    @Select("SELECT COUNT(*) FROM search_history " +
+            "WHERE deleted = 0 AND user_id = #{userId}")
+    Integer selectUserSearchCount(@Param("userId") Long userId);
+    
+    // 获取最近搜索记录
+    @Select("SELECT * FROM search_history " +
+            "WHERE deleted = 0 AND user_id = #{userId} " +
+            "ORDER BY search_time DESC LIMIT #{limit}")
+    List<SearchHistory> selectRecentSearches(@Param("userId") Long userId, @Param("limit") Integer limit);
 }

@@ -35,7 +35,13 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
             .authorizeRequests()
             // 公开接口，无需认证
             .antMatchers("/api/auth/login", "/api/auth/logout").permitAll()
-            .antMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-resources/**").permitAll()
+            // Swagger相关路径，无需认证
+            .antMatchers("/swagger-ui/**", "/swagger-ui.html").permitAll()
+            .antMatchers("/v3/api-docs/**", "/v3/api-docs").permitAll()
+            .antMatchers("/swagger-resources/**", "/swagger-resources").permitAll()
+            .antMatchers("/webjars/**").permitAll()
+            .antMatchers("/swagger-ui/index.html").permitAll()
+            .antMatchers("/swagger-ui/index.html/**").permitAll()
             .antMatchers("/error").permitAll()
             // 其他所有接口都需要认证
             .anyRequest().authenticated()
