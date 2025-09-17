@@ -21,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.URLEncoder;
 
 import javax.validation.Valid;
@@ -265,7 +266,13 @@ public class KnowledgeController {
             }
             byte[] bytes;
             try (InputStream in = new FileInputStream(file)) {
-                bytes = in.readAllBytes();
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] data = new byte[1024];
+                int nRead;
+                while ((nRead = in.read(data, 0, data.length)) != -1) {
+                    buffer.write(data, 0, nRead);
+                }
+                bytes = buffer.toByteArray();
             }
             // 下载计数+1（忽略并发的轻微不一致）
             try {
