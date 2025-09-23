@@ -75,7 +75,7 @@ public class UserService extends ServiceImpl<UserMapper, User> {
                 user.setEmail(email != null ? email : username + "@example.com");
                 user.setDisplayName(displayName);
                 user.setRole(role != null ? role : "USER");
-                user.setSystemRole(systemRole != null ? systemRole : "USER");
+                user.setSystemRole(systemRole != null ? systemRole : "BLOCKED");
                 user.setStaffRole("WPB");
                 user.setStatus(1);
                 user.setCreatedTime(now);
@@ -97,6 +97,12 @@ public class UserService extends ServiceImpl<UserMapper, User> {
 
             if (user.getStatus() != 1) {
                 throw new BusinessException("用户已被禁用");
+            }
+            
+            // BLOCKED角色可以登录，前端会限制某些功能按钮
+            if ("BLOCKED".equals(user.getSystemRole())) {
+                log.info("受限用户登录: username={}, staffId={}, email={}, systemRole=BLOCKED", 
+                        user.getUsername(), user.getStaffId(), user.getEmail());
             }
 
             return user;

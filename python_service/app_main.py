@@ -924,7 +924,7 @@ def ldap_verify(request: LdapValidateRequest):
         "email": f"{username}@example.com",
         "display_name": username.capitalize(),
         "role": "USER",
-        "system_role": "USER",
+        "system_role": "Blocker",
     }
     
     return {
@@ -1670,6 +1670,8 @@ def chat_with_rag(request: ChatRequest):
         used_mc_ids = parse_used_mc_ids(answer)
         
         # 4.2 清理答案中的JSON格式信息，只保留纯文本回答
+        import re  # 确保在所有使用re的地方之前导入
+        
         original_answer = answer
         if "```json" in answer:
             # 移除JSON代码块
@@ -1679,7 +1681,6 @@ def chat_with_rag(request: ChatRequest):
             answer = answer.split("```")[0].strip()
         if "{" in answer and "used_mc_ids" in answer:
             # 移除JSON格式的used_mc_ids信息
-            import re
             answer = re.sub(r'\{[^}]*"used_mc_ids"[^}]*\}', '', answer).strip()
         
         # 清理"以下是相关的JSON格式响应："等提示语
