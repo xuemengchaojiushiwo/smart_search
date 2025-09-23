@@ -3,6 +3,7 @@ import json
 import logging
 from typing import List, Dict, Any, Optional
 import time
+import os
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +23,18 @@ class GeekAIClient:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
+        
+        # 禁用代理设置
+        self.proxies = {}
+        # 清除环境变量中的代理设置
+        if 'http_proxy' in os.environ:
+            del os.environ['http_proxy']
+        if 'https_proxy' in os.environ:
+            del os.environ['https_proxy']
+        if 'HTTP_PROXY' in os.environ:
+            del os.environ['HTTP_PROXY']
+        if 'HTTPS_PROXY' in os.environ:
+            del os.environ['HTTPS_PROXY']
     
     def chat_completion(self, 
                        messages: List[Dict[str, str]], 
@@ -61,7 +74,8 @@ class GeekAIClient:
                 self.chat_url,
                 headers=self.headers,
                 json=payload,
-                timeout=60
+                timeout=120,
+                proxies=self.proxies
             )
             
             if response.status_code == 200:
@@ -111,7 +125,8 @@ class GeekAIClient:
                 headers=self.headers,
                 json=payload,
                 stream=True,
-                timeout=60
+                timeout=120,
+                proxies=self.proxies
             )
             
             if response.status_code == 200:
@@ -136,43 +151,63 @@ class GeekAIClient:
             logger.error(f"流式API调用异常: {str(e)}")
             yield {"error": f"流式API调用异常: {str(e)}"}
     
-    def get_embeddings(self, texts: List[str], model: str = "text-embedding-ada-002") -> Dict[str, Any]:
+    def get_embeddings(self, texts: List[str], model: str = "text-embedding-ada-002", max_retries: int = 3) -> Dict[str, Any]:
         """
-        获取文本向量化结果
+        获取文本向量化结果（带重试机制）
         
         Args:
             texts: 文本列表
             model: 向量化模型名称
+            max_retries: 最大重试次数
             
         Returns:
             向量化结果
         """
-        try:
-            payload = {
-                "model": model,
-                "input": texts
-            }
-            
-            logger.info(f"调用极客智坊向量化API: model={model}, texts_count={len(texts)}")
-            
-            response = requests.post(
-                self.embedding_url,
-                headers=self.headers,
-                json=payload,
-                timeout=60
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                logger.info(f"向量化API调用成功: model={model}")
-                return result
-            else:
-                logger.error(f"向量化API调用失败: status_code={response.status_code}, response={response.text}")
-                return {"error": f"向量化API调用失败: {response.status_code}", "details": response.text}
+        for attempt in range(max_retries):
+            try:
+                payload = {
+                    "model": model,
+                    "input": texts
+                }
                 
-        except Exception as e:
-            logger.error(f"向量化API调用异常: {str(e)}")
-            return {"error": f"向量化API调用异常: {str(e)}"}
+                logger.info(f"调用极客智坊向量化API (尝试 {attempt + 1}/{max_retries}): model={model}, texts_count={len(texts)}")
+                
+                # 重试间隔
+                if attempt > 0:
+                    wait_time = 2 ** attempt
+                    logger.info(f"等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                
+                response = requests.post(
+                    self.embedding_url,
+                    headers=self.headers,
+                    json=payload,
+                    timeout=120,  # 增加超时时间到120秒
+                    proxies=self.proxies
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.info(f"向量化API调用成功: model={model}")
+                    return result
+                else:
+                    logger.warning(f"向量化API调用失败 (尝试 {attempt + 1}/{max_retries}): status_code={response.status_code}, response={response.text}")
+                    if attempt == max_retries - 1:
+                        logger.error(f"向量化API最终失败: status_code={response.status_code}, response={response.text}")
+                        return {"error": f"向量化API调用失败: {response.status_code}", "details": response.text}
+                
+            except requests.exceptions.Timeout as e:
+                logger.warning(f"向量化API超时 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                if attempt == max_retries - 1:
+                    logger.error(f"向量化API最终超时失败: {str(e)}")
+                    return {"error": f"向量化API超时失败: {str(e)}"}
+            except Exception as e:
+                logger.warning(f"向量化API调用异常 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                if attempt == max_retries - 1:
+                    logger.error(f"向量化API最终异常失败: {str(e)}")
+                    return {"error": f"向量化API调用异常: {str(e)}"}
+        
+        return {"error": "向量化API调用失败: 超过最大重试次数"}
     
     def simple_chat(self, message: str, model: str = "gpt-4o-mini") -> str:
         """

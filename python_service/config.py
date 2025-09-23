@@ -6,7 +6,7 @@ import os
 
 # Elasticsearch配置
 EMBEDDING_DIMS = 1536  # 默认1536维，切换自定义API时改为1024
-ES_INDEX = f'knowledge_base_new_{EMBEDDING_DIMS}'
+ES_INDEX = 'knowledge_base_new'
 
 ES_CONFIG = {
     'host': 'localhost',
