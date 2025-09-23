@@ -1409,7 +1409,7 @@ def store_chunks_to_es(chunks: List[Document], knowledge_id: int):
                 logger.error(f"Chunk {i} embedding 维度不匹配: got={emb_len}, expected={EMBEDDING_DIMS}，已跳过入库")
                 continue
             
-            # 准备ES文档
+            # 准备ES文档，确保中文内容使用正确的UTF-8编码
             es_doc = {
                 "content": chunk.page_content,
                 "embedding": chunk_embedding,
@@ -1428,6 +1428,12 @@ def store_chunks_to_es(chunks: List[Document], knowledge_id: int):
                 "node_type": "doc",  # 明确标识这是文档类型
                 "weight": 1.0
             }
+            
+            # 确保所有字符串字段使用正确的UTF-8编码
+            for key, value in es_doc.items():
+                if isinstance(value, str):
+                    # 确保字符串是有效的UTF-8编码
+                    es_doc[key] = value.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
             
             # 存储到ES
             es_client.index(index=ES_CONFIG['index'], id=doc_id, document=es_doc)
@@ -1676,6 +1682,10 @@ def chat_with_rag(request: ChatRequest):
             import re
             answer = re.sub(r'\{[^}]*"used_mc_ids"[^}]*\}', '', answer).strip()
         
+        # 清理"以下是相关的JSON格式响应："等提示语
+        answer = re.sub(r'以下是相关的JSON格式响应：', '', answer).strip()
+        answer = re.sub(r'以下是JSON格式的响应：', '', answer).strip()
+        
         if answer != original_answer:
             logger.info(f"已清理JSON信息，原始长度: {len(original_answer)}, 清理后长度: {len(answer)}")
         logger.info(f"模型返回 used_mc_ids 数量: {len(used_mc_ids)}")
@@ -1724,13 +1734,14 @@ def chat_with_rag(request: ChatRequest):
         for chunk in context_chunks:
             metadata = chunk['metadata']
             mini_chunks = metadata.get('mini_chunks', [])
-            if not mini_chunks and metadata.get('knowledge_id') == 30:
-                logger.info(f"检测到知识ID为30的chunk {metadata.get('chunk_index')} 没有mini-chunks，可能需要重新处理PDF")
+            if not mini_chunks:
+                knowledge_id = metadata.get('knowledge_id')
+                logger.info(f"检测到知识ID为{knowledge_id}的chunk {metadata.get('chunk_index')} 没有mini-chunks，可能需要重新处理PDF")
                 need_reprocess = True
                 break
         
         if need_reprocess:
-            logger.warning("检测到新上传的PDF没有正确生成mini-chunks，请考虑重新上传文件或重启服务")
+            logger.warning("检测到PDF没有正确生成mini-chunks，请考虑重新上传文件或重启服务")
             
         chunks_with_mini_chunks = []
         chunks_without_mini_chunks = []
@@ -1758,9 +1769,15 @@ def chat_with_rag(request: ChatRequest):
                 chunks_without_mini_chunks.append(chunk)
                 logger.info(f"Chunk {metadata.get('chunk_index')} 无mini-chunks")
         
-        # 优先使用有mini-chunks的chunk
-        selected_chunks = chunks_with_mini_chunks if chunks_with_mini_chunks else chunks_without_mini_chunks
-        logger.info(f"选择了 {len(selected_chunks)} 个chunks（有mini-chunks: {len(chunks_with_mini_chunks)}, 无mini-chunks: {len(chunks_without_mini_chunks)}）")
+        # 优先使用有mini-chunks的chunk，最多只返回一个没有mini-chunks的chunk
+        if chunks_with_mini_chunks:
+            selected_chunks = chunks_with_mini_chunks
+        elif chunks_without_mini_chunks:
+            # 如果没有mini-chunks，只返回相似度最高的一个chunk
+            selected_chunks = [max(chunks_without_mini_chunks, key=lambda x: x.get('metadata', {}).get('relevance_score', 0))]
+        else:
+            selected_chunks = []
+        logger.info(f"选择了 {len(selected_chunks)} 个chunks（有mini-chunks: {len(chunks_with_mini_chunks)}, 无mini-chunks: {len(selected_chunks) - len(chunks_with_mini_chunks)}）")
 
         # 如果阈值过滤后没有任何chunk，或者所有选中的chunk都没有mini-chunks，通过LLM返回顺序取第一个有效的mini-chunk所属的大块作为兜底
         if not selected_chunks or all(len(chunk.get('metadata', {}).get('mini_chunks', [])) == 0 for chunk in selected_chunks):
@@ -1796,7 +1813,15 @@ def chat_with_rag(request: ChatRequest):
 
             # 从模型返回的 used_mc_ids 中取本 chunk 的高亮，只取第一个（最相关的）
             key = (metadata.get('knowledge_id', 0), metadata.get('chunk_index', 0))
-            hl_for_chunk = chunk_key_to_highlights.get(key, [])[:1]
+            # 确保使用大模型选择的mini-chunk，而不是按照chunk过滤
+            hl_for_chunk = []
+            for mcid in used_mc_ids:
+                entry = mcid_to_entry.get(mcid)
+                if entry and entry.get("knowledge_id") == metadata.get('knowledge_id'):
+                    # 直接使用大模型选择的mini-chunk，不检查页码
+                    hl_for_chunk.append(entry)
+                    logger.info(f"找到匹配的mini-chunk: {mcid}, 页码: {entry.get('page')}, 文本: {entry.get('text')[:30]}...")
+                    break
 
             # 如果有选中的小块，使用所有选中小块的合并坐标并扩大4倍；否则使用大块的坐标
             if hl_for_chunk:
@@ -1815,9 +1840,9 @@ def chat_with_rag(request: ChatRequest):
                     width = x1 - x0
                     height = y1 - y0
 
-                    # 扩大倍率调整到1.8倍，确保短文本也能有足够大的高亮区域
-                    new_width = width * 1.8
-                    new_height = height * 1.8
+                    # 扩大倍率调整到4倍，确保短文本也能有足够大的高亮区域
+                    new_width = width * 4
+                    new_height = height * 4
 
                     # 计算新的边界框
                     new_x0 = center_x - new_width / 2
@@ -1826,7 +1851,7 @@ def chat_with_rag(request: ChatRequest):
                     new_y1 = center_y + new_height / 2
 
                     bbox_to_use = [new_x0, new_y0, new_x1, new_y1]
-                    logger.info(f"为 chunk {metadata.get('chunk_index')} 使用选中小块合并坐标并扩大1.8倍: {[x0, y0, x1, y1]} -> {bbox_to_use}")
+                    logger.info(f"为 chunk {metadata.get('chunk_index')} 使用选中小块合并坐标并扩大4倍: {[x0, y0, x1, y1]} -> {bbox_to_use}")
                 else:
                     bbox_to_use = metadata.get('bbox', [])
                     logger.info(f"为 chunk {metadata.get('chunk_index')} 小块坐标为空或格式错误，使用大块坐标")
@@ -1834,6 +1859,9 @@ def chat_with_rag(request: ChatRequest):
                 # 使用大块坐标
                 bbox_to_use = metadata.get('bbox', [])
                 logger.info(f"为 chunk {metadata.get('chunk_index')} 无小块，使用大块坐标")
+            
+            # 如果有选中的小块，使用小块的页码；否则使用chunk的页码
+            page_num_to_use = hl_for_chunk[0].get("page", metadata.get('page_num', 0)) if hl_for_chunk else metadata.get('page_num', 0)
             
             references.append(KnowledgeReference(
                 knowledge_id=int(metadata.get('knowledge_id', 0)) if metadata.get('knowledge_id') is not None else 0,
@@ -1844,7 +1872,7 @@ def chat_with_rag(request: ChatRequest):
                 attachments=[metadata.get('document_name', '')],
                 relevance=relevance_score,
                 source_file=metadata.get('document_name', ''),
-                page_num=metadata.get('page_num', 0),
+                page_num=page_num_to_use,  # 使用选中小块的页码或大块的页码
                 chunk_index=metadata.get('chunk_index', 0),
                 chunk_type="content",
                 bbox_union=bbox_to_use,  # 使用选中的小块坐标或大块坐标
