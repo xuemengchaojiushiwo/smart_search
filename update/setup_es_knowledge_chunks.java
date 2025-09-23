@@ -39,7 +39,8 @@ mapping = {
             "weight": {"type": "float"},
             "page_num": {"type": "integer"},
             "bbox": {"type": "float"},  # 新的边界框字段 [x0, y0, x1, y1]
-            "positions": {"type": "object", "enabled": False},  # 新的位置信息字段
+            "positions": {"type": "object", "enabled": False},  # 细粒度span位置信息（仅取回）
+            "mini_chunks": {"type": "object", "enabled": False},  # 行/句级小块，仅用于定位与展示
             "content": {"type": "text"},
             "embedding": {"type": "dense_vector", "dims": EMBEDDING_DIMS}
         }
