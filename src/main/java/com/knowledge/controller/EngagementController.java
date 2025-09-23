@@ -36,6 +36,7 @@ public class EngagementController {
 	@PostMapping("/like/{knowledgeId}")
 	@Operation(summary = "点赞")
 	public ApiResponse<Void> like(@PathVariable Long knowledgeId, @RequestParam(defaultValue = "1") Long userId) {
+		// 使用用户的staffId作为userId存储，而不是自增ID
 		engagementService.like(knowledgeId, userId);
 		return ApiResponse.success(null);
 	}
@@ -43,6 +44,7 @@ public class EngagementController {
 	@PostMapping("/unlike/{knowledgeId}")
 	@Operation(summary = "取消点赞")
 	public ApiResponse<Void> unlike(@PathVariable Long knowledgeId, @RequestParam(defaultValue = "1") Long userId) {
+		// 使用用户的staffId作为userId存储，而不是自增ID
 		engagementService.unlike(knowledgeId, userId);
 		return ApiResponse.success(null);
 	}
@@ -50,6 +52,7 @@ public class EngagementController {
 	@PostMapping("/favorite/{knowledgeId}")
 	@Operation(summary = "收藏")
 	public ApiResponse<Void> favorite(@PathVariable Long knowledgeId, @RequestParam(defaultValue = "1") Long userId) {
+		// 使用用户的staffId作为userId存储，而不是自增ID
 		engagementService.favorite(knowledgeId, userId);
 		return ApiResponse.success(null);
 	}
@@ -57,6 +60,7 @@ public class EngagementController {
 	@PostMapping("/unfavorite/{knowledgeId}")
 	@Operation(summary = "取消收藏")
 	public ApiResponse<Void> unfavorite(@PathVariable Long knowledgeId, @RequestParam(defaultValue = "1") Long userId) {
+		// 使用用户的staffId作为userId存储，而不是自增ID
 		engagementService.unfavorite(knowledgeId, userId);
 		return ApiResponse.success(null);
 	}
@@ -68,6 +72,7 @@ public class EngagementController {
 			@RequestBody FeedbackRequest request) {
 		log.info("收到反馈请求: knowledgeId={}, userId={}, content={}, feedbackType={}", 
 				knowledgeId, request.getUserId(), request.getContent(), request.getFeedbackType());
+		// 使用用户的staffId作为userId存储，而不是自增ID
 		engagementService.feedback(knowledgeId, request.getUserId(), request.getContent(), request.getFeedbackType());
 		return ApiResponse.success(null);
 	}
@@ -80,6 +85,7 @@ public class EngagementController {
 			@RequestParam(required = false) Integer size,
 			@RequestParam(required = false) Long knowledgeId,
 			@RequestParam(required = false) Long userId) {
+		// userId参数为用户的staffId，而不是自增ID
 		return ApiResponse.success(engagementService.listFeedbacks(page, size, knowledgeId, userId));
 	}
 
@@ -96,6 +102,7 @@ public class EngagementController {
 			@RequestParam(required = false) Integer page,
 			@RequestParam(required = false) Integer size,
 			@RequestParam(defaultValue = "1") Long userId) {
+		// userId参数为用户的staffId，而不是自增ID
 		return ApiResponse.success(engagementService.listUserFavorites(page, size, userId));
 	}
 
@@ -104,13 +111,25 @@ public class EngagementController {
 	public ApiResponse<Object> getFavoriteStatus(
 			@PathVariable Long knowledgeId,
 			@RequestParam(defaultValue = "1") Long userId) {
+		// userId参数为用户的staffId，而不是自增ID
 		return ApiResponse.success(engagementService.getFavoriteStatus(knowledgeId, userId));
 	}
 
 	@Data
 	public static class FeedbackRequest {
+		/**
+		 * 用户ID，应使用用户的staffId，而非自增ID
+		 */
 		private Long userId;
+		
+		/**
+		 * 反馈内容
+		 */
 		private String content;
+		
+		/**
+		 * 反馈类型，如out_of_date/unclear/not_relevant
+		 */
 		private String feedbackType;
 	}
 }
