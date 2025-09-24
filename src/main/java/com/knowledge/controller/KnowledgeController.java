@@ -8,6 +8,7 @@ import com.knowledge.service.KnowledgeService;
 import com.knowledge.util.SecurityUtils;
 import com.knowledge.vo.ApiResponse;
 import com.knowledge.vo.KnowledgeVO;
+import com.knowledge.vo.KnowledgeListVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -173,39 +174,52 @@ public class KnowledgeController {
     }
     
     @GetMapping
-    @Operation(summary = "获取知识列表", description = "分页获取知识列表")
-    public ApiResponse<IPage<KnowledgeVO>> getKnowledgeList(
+    @Operation(summary = "获取知识列表", description = "分页获取知识列表，只返回必要的ID和名称等基础信息")
+    public ApiResponse<IPage<KnowledgeListVO>> getKnowledgeList(
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size) {
-        javax.servlet.http.HttpServletRequest req = ((org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()).getRequest();
+        org.springframework.web.context.request.ServletRequestAttributes attributes = 
+            (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
         String userId = resolveUserIdFromHeader(req);
         List<String> allowed = resolveAllowedWorkspaces(userId);
         IPage<KnowledgeVO> result = knowledgeService.getKnowledgeListFiltered(page, size, allowed);
-        return ApiResponse.success("获取知识列表成功", result);
+        
+        // 转换为简化版的KnowledgeListVO
+        IPage<KnowledgeListVO> simplifiedResult = result.convert(KnowledgeListVO::fromKnowledgeVO);
+        return ApiResponse.success("获取知识列表成功", simplifiedResult);
     }
     
     @GetMapping("/{parentId}/children")
-    @Operation(summary = "获取子知识", description = "根据父知识ID分页获取直接子节点，parentId传null或0获取根节点")
-    public ApiResponse<IPage<KnowledgeVO>> getChildren(
+    @Operation(summary = "获取子知识", description = "根据父知识ID分页获取直接子节点，parentId传null或0获取根节点，只返回必要的ID和名称等基础信息")
+    public ApiResponse<IPage<KnowledgeListVO>> getChildren(
             @Parameter(description = "父知识ID", required = true, example = "1") @PathVariable Long parentId,
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size) {
-        javax.servlet.http.HttpServletRequest req = ((org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()).getRequest();
+        org.springframework.web.context.request.ServletRequestAttributes attributes = 
+            (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
         String userId = resolveUserIdFromHeader(req);
         List<String> allowed = resolveAllowedWorkspaces(userId);
         IPage<KnowledgeVO> result = knowledgeService.getChildrenFiltered(parentId == 0 ? null : parentId, page, size, allowed);
-        return ApiResponse.success("获取子知识成功", result);
+        
+        // 转换为简化版的KnowledgeListVO
+        IPage<KnowledgeListVO> simplifiedResult = result.convert(KnowledgeListVO::fromKnowledgeVO);
+        return ApiResponse.success("获取子知识成功", simplifiedResult);
     }
 
     // 兼容旧接口：按类目获取知识 => 等价于获取父知识下子节点
     @GetMapping("/category/{categoryId}")
-    @Operation(summary = "[兼容] 根据类目获取知识", description = "兼容旧接口：等价于 /api/knowledge/{parentId}/children")
-    public ApiResponse<IPage<KnowledgeVO>> getKnowledgeByCategoryCompat(
+    @Operation(summary = "[兼容] 根据类目获取知识", description = "兼容旧接口：等价于 /api/knowledge/{parentId}/children，只返回必要的ID和名称等基础信息")
+    public ApiResponse<IPage<KnowledgeListVO>> getKnowledgeByCategoryCompat(
             @Parameter(description = "父知识ID(原类目ID)", required = true, example = "1") @PathVariable Long categoryId,
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size) {
         IPage<KnowledgeVO> result = knowledgeService.getChildren(categoryId == 0 ? null : categoryId, page, size);
-        return ApiResponse.success("获取子知识成功", result);
+        
+        // 转换为简化版的KnowledgeListVO
+        IPage<KnowledgeListVO> simplifiedResult = result.convert(KnowledgeListVO::fromKnowledgeVO);
+        return ApiResponse.success("获取子知识成功", simplifiedResult);
     }
     
     @GetMapping("/popular")
