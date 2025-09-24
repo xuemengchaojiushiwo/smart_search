@@ -18,6 +18,7 @@ import subprocess
 from shutil import which
 import shutil
 import requests
+import json
 
 # PyMuPDF相关
 try:
@@ -71,8 +72,7 @@ app = FastAPI(title="智能知识库系统", version="2.0.0")
 from config import (
     ES_CONFIG, DOCUMENT_CONFIG, EMBEDDING_CONFIG, RAG_CONFIG,
     EMBEDDING_DIMS,
-    CHUNKING_CONFIG, GEEKAI_API_KEY, GEEKAI_CHAT_URL,
-    GEEKAI_EMBEDDING_URL, DEFAULT_EMBEDDING_MODEL
+    CHUNKING_CONFIG, AI_API_SWITCH
 )
 from fastapi.responses import FileResponse
 
@@ -265,28 +265,37 @@ es_client = Elasticsearch(
     verify_certs=ES_CONFIG['verify_certs']
 )
 
-# 极客API embedding函数
+# 导入AI管理器
+from ai_client_manager import get_ai_manager
+
+# embedding函数
 def get_embedding(text: str) -> list:
-    """使用极客API获取文本嵌入向量"""
+    """获取文本嵌入向量，通过AI管理器调用"""
     try:
-        url = GEEKAI_EMBEDDING_URL
-        headers = {
-            "Authorization": f"Bearer {GEEKAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": DEFAULT_EMBEDDING_MODEL,
-            "input": [text],
-            "intent": "search_document"
-        }
-        response = requests.post(url, headers=headers, json=data, timeout=20)
-        if response.status_code == 200:
-            return response.json().get("data", [{}])[0].get("embedding")
-        else:
-            logger.error(f"极客API embedding失败: {response.status_code} - {response.text}")
+        logger.info(f"[DEBUG] 开始生成embedding, 文本长度: {len(text)}")
+        
+        # 获取AI管理器
+        manager = get_ai_manager()
+        
+        # 调用管理器的get_embeddings方法
+        result = manager.get_embeddings([text])
+        
+        # 检查结果
+        if "error" in result:
+            logger.error(f"[DEBUG] embedding生成失败: {result['error']}")
             return None
+        
+        # 提取embedding
+        if "data" in result and len(result["data"]) > 0:
+            embedding = result["data"][0].get("embedding")
+            if embedding:
+                logger.info(f"[DEBUG] embedding生成成功: 维度={len(embedding)}, 前5个值={embedding[:5]}, 使用API: {manager.get_current_api()}")
+                return embedding
+        
+        logger.error(f"[DEBUG] 无法从结果中提取embedding: {result}")
+        return None
     except Exception as e:
-        logger.error(f"极客API embedding异常: {e}")
+        logger.error(f"[DEBUG] embedding生成异常: {e}")
         return None
 
 # 请求模型
@@ -924,7 +933,7 @@ def ldap_verify(request: LdapValidateRequest):
         "email": f"{username}@example.com",
         "display_name": username.capitalize(),
         "role": "USER",
-        "system_role": "USER",
+        "system_role": "Blocker",
     }
     
     return {
@@ -1542,8 +1551,12 @@ def chat_with_rag(request: ChatRequest):
     
     try:
         # 1. 向量搜索找到相关chunks
+        logger.info(f"[DEBUG] 开始生成问题embedding: question={request.question}")
         question_embedding = get_embedding(request.question)
-        if not question_embedding:
+        if question_embedding:
+            logger.info(f"[DEBUG] 问题embedding生成成功: 维度={len(question_embedding)}, 前5个值={question_embedding[:5]}")
+        else:
+            logger.error("[DEBUG] 无法获取问题的embedding向量")
             return ChatResponse(
                 answer="抱歉，无法生成问题的向量表示，请重试。",
                 references=[],
@@ -1593,10 +1606,20 @@ def chat_with_rag(request: ChatRequest):
             ]
         }
         
+        logger.info(f"[DEBUG] 执行ES搜索: query={json.dumps(search_query, ensure_ascii=False)[:200]}...")
         search_response = es_client.search(index=ES_CONFIG['index'], body=search_query)
         hits = search_response.get('hits', {}).get('hits', [])
         
-        if not hits:
+        if hits:
+            logger.info(f"[DEBUG] ES搜索成功: 找到{len(hits)}个结果")
+            # 打印前3个结果的相似度分数
+            for i, hit in enumerate(hits[:3]):
+                source = hit['_source']
+                score = hit['_score']
+                logger.info(f"[DEBUG] 结果{i+1}: knowledge_id={source.get('knowledge_id')}, 相似度={score}, 文件={source.get('source_file')}")
+                logger.info(f"[DEBUG] 内容片段: {source.get('content', '')[:100]}...")
+        else:
+            logger.info("[DEBUG] ES搜索失败: 未找到相关知识块")
             return ChatResponse(
                 answer="抱歉，在知识库中没有找到相关信息。",
                 references=[],
@@ -1659,9 +1682,13 @@ def chat_with_rag(request: ChatRequest):
             logger.info(f"映射中的示例mc_ids: {sample_mc_ids}")
         
         # 3. 构建增强的RAG提示词（包含小块清单）
+        logger.info("[DEBUG] 开始构建RAG提示词")
         enhanced_prompt = build_enhanced_rag_prompt_with_mini_chunks(request.question, context_chunks)
+        logger.info(f"[DEBUG] RAG提示词长度: {len(enhanced_prompt)}")
+        logger.info(f"[DEBUG] RAG提示词前200字符: {enhanced_prompt[:200]}...")
         
         # 4. 调用大模型生成答案
+        logger.info("[DEBUG] 开始调用大模型生成答案")
         answer = generate_ai_answer(enhanced_prompt)
         logger.info(f"模型回答长度: {len(answer)}")
         logger.info(f"模型回答前500字符: {answer[:500]}")
@@ -1670,6 +1697,8 @@ def chat_with_rag(request: ChatRequest):
         used_mc_ids = parse_used_mc_ids(answer)
         
         # 4.2 清理答案中的JSON格式信息，只保留纯文本回答
+        import re  # 确保在所有使用re的地方之前导入
+        
         original_answer = answer
         if "```json" in answer:
             # 移除JSON代码块
@@ -1679,7 +1708,6 @@ def chat_with_rag(request: ChatRequest):
             answer = answer.split("```")[0].strip()
         if "{" in answer and "used_mc_ids" in answer:
             # 移除JSON格式的used_mc_ids信息
-            import re
             answer = re.sub(r'\{[^}]*"used_mc_ids"[^}]*\}', '', answer).strip()
         
         # 清理"以下是相关的JSON格式响应："等提示语
@@ -2045,58 +2073,51 @@ def build_enhanced_rag_prompt(question: str, context_chunks: List[Dict]) -> str:
 
 def generate_ai_answer(prompt: str) -> str:
     """
-    调用大模型生成答案
+    通过AI管理器调用大模型生成答案
     """
     try:
-        # 调用极客智坊API生成答案
-        headers = {
-            "Authorization": f"Bearer {GEEKAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
+        # 获取AI管理器
+        manager = get_ai_manager()
         
-        payload = {
-            "model": "gpt-4o-mini",  # 使用合适的模型
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "你是一个专业的文档知识助手，请基于提供的文档信息准确回答问题。"
-                },
-                {
-                    "role": "user", 
-                    "content": prompt
-                }
-            ],
-            "max_tokens": 1000,
-            "temperature": 0.3
-        }
+        # 构建消息
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一个专业的文档知识助手，请基于提供的文档信息准确回答问题。"
+            },
+            {
+                "role": "user", 
+                "content": prompt
+            }
+        ]
         
-        response = requests.post(
-            GEEKAI_CHAT_URL,
-            headers=headers,
-            json=payload,
-            timeout=30
+        # 调试：打印请求负载
+        logger.info(f"[DEBUG] 调用大模型的请求负载: {json.dumps(messages, ensure_ascii=False)[:200]}...")
+        
+        # 调用管理器的chat_completion方法
+        logger.info(f"[DEBUG] 通过AI管理器发送请求到大模型API, 当前API: {manager.get_current_api()}")
+        result = manager.chat_completion(
+            messages=messages,
+            temperature=0.3,
+            max_tokens=1000
         )
         
-        if response.status_code == 200:
-            result = response.json()
-            if "choices" in result and len(result["choices"]) > 0:
-                answer = result["choices"][0]["message"]["content"]
-                return answer
-            else:
-                logger.error(f"API响应格式异常: {result}")
-                return "抱歉，生成答案时出现格式错误，请重试。"
+        # 检查结果
+        if "error" in result:
+            logger.error(f"[DEBUG] 大模型API调用失败: {result['error']}")
+            return f"抱歉，生成答案时出现错误：{result['error']}，请重试。"
+        
+        # 提取答案
+        if "choices" in result and len(result["choices"]) > 0:
+            answer = result["choices"][0]["message"]["content"]
+            logger.info(f"[DEBUG] 大模型返回答案长度: {len(answer)}")
+            return answer
         else:
-            logger.error(f"API调用失败: {response.status_code}, {response.text}")
-            return f"抱歉，API调用失败（状态码：{response.status_code}），请重试。"
+            logger.error(f"[DEBUG] API响应格式异常: {result}")
+            return "抱歉，生成答案时出现格式错误，请重试。"
             
-    except requests.exceptions.Timeout:
-        logger.error("API调用超时")
-        return "抱歉，生成答案超时，请重试。"
-    except requests.exceptions.RequestException as e:
-        logger.error(f"API请求异常: {e}")
-        return f"抱歉，API请求异常：{str(e)}，请重试。"
     except Exception as e:
-        logger.error(f"生成AI答案失败: {e}")
+        logger.error(f"[DEBUG] 生成AI答案失败: {e}")
         return f"抱歉，生成答案时出现错误：{str(e)}，请重试。"
 
 def extract_keywords_from_content(content: str) -> List[str]:
@@ -2132,7 +2153,9 @@ def health_check():
         
         # 检查极客智坊API
         try:
-            headers = {"Authorization": f"Bearer {GEEKAI_API_KEY}"}
+            # 使用AI管理器获取授权信息
+            manager = get_ai_manager()
+            headers = {"Authorization": f"Bearer {manager.get_api_info().get('current_api')}"}
             response = requests.get("https://geekai.co/api/v1/models", headers=headers, timeout=5)
             geekai_status = "available" if response.status_code == 200 else "unavailable"
         except:
