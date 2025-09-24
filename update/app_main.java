@@ -1006,7 +1006,8 @@ def process_document_unified(
             # 使用新的PDF切分策略，确保大块和小块完全匹配
             from pdf_chunking_strategy import process_pdf_with_matched_chunks
             
-            documents = process_pdf_with_matched_chunks(doc, filename, max_chunk_size=1000, overlap=200)
+            # 使用更小的块大小，确保不超过token限制
+            documents = process_pdf_with_matched_chunks(doc, filename, max_chunk_size=500, overlap=100)
             logger.info(f"PDF切分后生成 {len(documents)} 个chunks")
 
             chunks = []

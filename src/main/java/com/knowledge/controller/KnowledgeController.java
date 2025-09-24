@@ -174,7 +174,7 @@ public class KnowledgeController {
     }
     
     @GetMapping
-    @Operation(summary = "获取知识列表", description = "分页获取知识列表，只返回必要的ID和名称等基础信息")
+    @Operation(summary = "获取知识列表", description = "分页获取知识列表，只返回必要的ID和名称等基础信息，默认只返回顶层目录")
     public ApiResponse<IPage<KnowledgeListVO>> getKnowledgeList(
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size) {
@@ -183,7 +183,9 @@ public class KnowledgeController {
         javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
         String userId = resolveUserIdFromHeader(req);
         List<String> allowed = resolveAllowedWorkspaces(userId);
-        IPage<KnowledgeVO> result = knowledgeService.getKnowledgeListFiltered(page, size, allowed);
+        
+        // 修改为只获取顶层目录（parentId=null或0的记录）
+        IPage<KnowledgeVO> result = knowledgeService.getChildrenFiltered(null, page, size, allowed);
         
         // 转换为简化版的KnowledgeListVO
         IPage<KnowledgeListVO> simplifiedResult = result.convert(KnowledgeListVO::fromKnowledgeVO);

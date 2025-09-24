@@ -128,7 +128,7 @@ def _generate_mini_chunks_from_block(positions: List[Dict], line_texts: List[str
         should_start_new = (
             not current_lines or  # 第一个非空行
             _should_start_new_semantic_unit(current_lines[-1], line_text) or  # 语义分割
-            len('\n'.join(current_lines)) > 300  # 长度限制增加到300，让mini-chunk更大
+            len('\n'.join(current_lines)) > 200  # 长度限制减小到200，确保mini-chunk不会太大
         )
         
         if should_start_new and current_lines:
@@ -356,8 +356,8 @@ def _extract_positions_for_lines(mini_chunks: List[Dict], all_positions: List[Di
     return filtered_positions
 
 def process_pdf_with_matched_chunks(doc: fitz.Document, filename: str, 
-                                  max_chunk_size: int = 1000, 
-                                  overlap: int = 200) -> List[Dict]:
+                                  max_chunk_size: int = 500, 
+                                  overlap: int = 100) -> List[Dict]:
     """
     处理PDF并生成完全匹配的大块和小块
     返回格式与原有Document.metadata兼容
