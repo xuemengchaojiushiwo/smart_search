@@ -1405,7 +1405,21 @@ def store_chunks_to_es(chunks: List[Document], knowledge_id: int):
             doc_id = hashlib.md5(f"{knowledge_id}_{i}_{chunk.page_content[:100]}".encode()).hexdigest()
             
             # 为chunk生成embedding
-            chunk_embedding = get_embedding(chunk.page_content)
+            # 检查文本长度并截断，避免超过512 tokens的限制
+            MAX_TEXT_LENGTH = 1500  # 安全阈值，避免超过512 tokens
+            chunk_text = chunk.page_content
+            if len(chunk_text) > MAX_TEXT_LENGTH:
+                logger.warning(f"Chunk {i} 文本长度({len(chunk_text)})超过限制({MAX_TEXT_LENGTH})，将进行截断")
+                # 对于长文本，取开头和结尾的部分
+                head_length = MAX_TEXT_LENGTH // 2
+                tail_length = MAX_TEXT_LENGTH // 2
+                truncated_text = chunk_text[:head_length] + "..." + chunk_text[-tail_length:]
+                logger.info(f"截断后长度: {len(truncated_text)}")
+                chunk_text = truncated_text
+            else:
+                chunk_text = chunk.page_content
+                
+            chunk_embedding = get_embedding(chunk_text)
             if not chunk_embedding:
                 logger.warning(f"Chunk {i} embedding生成失败，跳过")
                 continue
@@ -1552,7 +1566,20 @@ def chat_with_rag(request: ChatRequest):
     try:
         # 1. 向量搜索找到相关chunks
         logger.info(f"[DEBUG] 开始生成问题embedding: question={request.question}")
-        question_embedding = get_embedding(request.question)
+        # 检查问题长度，确保不超过token限制
+        MAX_QUESTION_LENGTH = 500  # 安全阈值，避免超过512 tokens
+        question_text = request.question
+        if len(question_text) > MAX_QUESTION_LENGTH:
+            logger.warning(f"问题长度({len(question_text)})超过限制({MAX_QUESTION_LENGTH})，将使用大模型浓缩")
+            # 使用大模型浓缩问题而不是直接截取
+            condensed_question = condense_question_with_llm(question_text)
+            if condensed_question:
+                question_text = condensed_question
+                logger.info(f"浓缩后长度: {len(question_text)}")
+            else:
+                logger.warning(f"浓缩失败，使用原问题")
+        
+        question_embedding = get_embedding(question_text)
         if question_embedding:
             logger.info(f"[DEBUG] 问题embedding生成成功: 维度={len(question_embedding)}, 前5个值={question_embedding[:5]}")
         else:
@@ -2070,6 +2097,71 @@ def build_enhanced_rag_prompt(question: str, context_chunks: List[Dict]) -> str:
 """
     
     return prompt
+
+def condense_question_with_llm(question: str, max_length: int = 500) -> str:
+    """
+    使用大模型浓缩过长的问题
+    
+    Args:
+        question: 原始问题
+        max_length: 目标最大长度
+        
+    Returns:
+        浓缩后的问题，如果失败则返回None
+    """
+    try:
+        # 获取AI管理器
+        manager = get_ai_manager()
+        
+        # 构建浓缩提示
+        condense_prompt = f"""
+请将以下问题浓缩为不超过{max_length}个字符的简洁版本，保留关键信息和查询意图。
+不要改变问题的本质和核心需求，只需要使其更简洁。
+
+原问题: {question}
+
+浓缩后的问题(不超过{max_length}字符):
+"""
+        
+        # 构建消息
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一个专业的文本浓缩助手，擅长保留文本核心含义的同时减少字符数量。"
+            },
+            {
+                "role": "user", 
+                "content": condense_prompt
+            }
+        ]
+        
+        # 调用管理器的chat_completion方法
+        logger.info(f"[DEBUG] 通过AI管理器发送问题浓缩请求, 当前API: {manager.get_current_api()}")
+        result = manager.chat_completion(
+            messages=messages,
+            temperature=0.3,
+            max_tokens=500
+        )
+        
+        # 检查结果
+        if "error" in result:
+            logger.error(f"[DEBUG] 问题浓缩失败: {result['error']}")
+            return None
+        
+        # 提取浓缩后的问题
+        if "choices" in result and len(result["choices"]) > 0:
+            condensed = result["choices"][0]["message"]["content"]
+            # 清理可能的引号和多余空格
+            condensed = condensed.strip().strip('"\'').strip()
+            logger.info(f"[DEBUG] 问题浓缩成功: 原长度={len(question)}, 新长度={len(condensed)}")
+            return condensed
+        else:
+            logger.error(f"[DEBUG] 问题浓缩API响应格式异常: {result}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"[DEBUG] 问题浓缩失败: {e}")
+        return None
 
 def generate_ai_answer(prompt: str) -> str:
     """
