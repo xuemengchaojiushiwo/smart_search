@@ -192,6 +192,18 @@ public class KnowledgeService {
      * 获取某个父知识下的直接子节点
      */
     public IPage<KnowledgeVO> getChildren(Long parentId, int page, int size) {
+        return getChildren(parentId, page, size, null);
+    }
+    
+    /**
+     * 获取某个父知识下的直接子节点，支持按节点类型过滤
+     * @param parentId 父节点ID
+     * @param page 页码
+     * @param size 每页大小
+     * @param nodeType 节点类型，可为null表示不过滤
+     * @return 分页结果
+     */
+    public IPage<KnowledgeVO> getChildren(Long parentId, int page, int size, String nodeType) {
         Page<Knowledge> pageParam = new Page<>(page, size);
         LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Knowledge::getDeleted, 0);
@@ -203,6 +215,10 @@ public class KnowledgeService {
         } else {
             wrapper.eq(Knowledge::getParentId, parentId);
         }
+        // 添加节点类型过滤
+        if (nodeType != null && !nodeType.isEmpty()) {
+            wrapper.eq(Knowledge::getNodeType, nodeType);
+        }
         wrapper.orderByAsc(Knowledge::getNodeType); // folder优先
         wrapper.orderByDesc(Knowledge::getUpdatedTime);
         IPage<Knowledge> knowledgePage = knowledgeMapper.selectPage(pageParam, wrapper);
@@ -210,8 +226,22 @@ public class KnowledgeService {
     }
 
     public IPage<KnowledgeVO> getChildrenFiltered(Long parentId, int page, int size, java.util.List<String> allowedWorkspaces) {
+        return getChildrenFiltered(parentId, page, size, allowedWorkspaces, null);
+    }
+    
+    /**
+     * 获取子节点，支持按节点类型过滤
+     * @param parentId 父节点ID
+     * @param page 页码
+     * @param size 每页大小
+     * @param allowedWorkspaces 允许的工作空间
+     * @param nodeType 节点类型，可为null表示不过滤
+     * @return 分页结果
+     */
+    public IPage<KnowledgeVO> getChildrenFiltered(Long parentId, int page, int size, java.util.List<String> allowedWorkspaces, String nodeType) {
         if (allowedWorkspaces == null || allowedWorkspaces.isEmpty()) {
-            return getChildren(parentId, page, size);
+            // 调用带nodeType参数的getChildren方法
+            return getChildren(parentId, page, size, nodeType);
         }
         Page<Knowledge> pageParam = new Page<>(page, size);
         java.util.Set<Long> ids = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaces(allowedWorkspaces);
@@ -227,6 +257,10 @@ public class KnowledgeService {
             wrapper.and(w -> w.isNull(Knowledge::getParentId).or().eq(Knowledge::getParentId, 0L));
         } else {
             wrapper.eq(Knowledge::getParentId, parentId);
+        }
+        // 添加节点类型过滤
+        if (nodeType != null && !nodeType.isEmpty()) {
+            wrapper.eq(Knowledge::getNodeType, nodeType);
         }
         wrapper.orderByAsc(Knowledge::getNodeType);
         wrapper.orderByDesc(Knowledge::getUpdatedTime);
