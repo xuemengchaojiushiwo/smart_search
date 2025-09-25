@@ -178,7 +178,7 @@ public class KnowledgeController {
     public ApiResponse<IPage<KnowledgeListVO>> getKnowledgeList(
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size,
-            @Parameter(description = "节点类型，可选值：folder/doc", example = "folder") @RequestParam(required = false) String nodeType) {
+            @Parameter(description = "节点类型，可选值：folder/doc", example = "folder") @RequestParam(defaultValue = "folder") String nodeType) {
         org.springframework.web.context.request.ServletRequestAttributes attributes = 
             (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
         javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
@@ -199,13 +199,14 @@ public class KnowledgeController {
     public ApiResponse<IPage<KnowledgeListVO>> getChildren(
             @Parameter(description = "父知识ID", required = true, example = "1") @PathVariable Long parentId,
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
-            @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size) {
+            @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size,
+            @Parameter(description = "节点类型，可选值：folder/doc", example = "folder") @RequestParam(defaultValue = "folder") String nodeType) {
         org.springframework.web.context.request.ServletRequestAttributes attributes = 
             (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
         javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
         String userId = resolveUserIdFromHeader(req);
         List<String> allowed = resolveAllowedWorkspaces(userId);
-        IPage<KnowledgeVO> result = knowledgeService.getChildrenFiltered(parentId == 0 ? null : parentId, page, size, allowed);
+        IPage<KnowledgeVO> result = knowledgeService.getChildrenFiltered(parentId == 0 ? null : parentId, page, size, allowed, nodeType);
         
         // 转换为简化版的KnowledgeListVO
         IPage<KnowledgeListVO> simplifiedResult = result.convert(KnowledgeListVO::fromKnowledgeVO);
@@ -218,8 +219,9 @@ public class KnowledgeController {
     public ApiResponse<IPage<KnowledgeListVO>> getKnowledgeByCategoryCompat(
             @Parameter(description = "父知识ID(原类目ID)", required = true, example = "1") @PathVariable Long categoryId,
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
-            @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size) {
-        IPage<KnowledgeVO> result = knowledgeService.getChildren(categoryId == 0 ? null : categoryId, page, size);
+            @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size,
+            @Parameter(description = "节点类型，可选值：folder/doc", example = "folder") @RequestParam(defaultValue = "folder") String nodeType) {
+        IPage<KnowledgeVO> result = knowledgeService.getChildren(categoryId == 0 ? null : categoryId, page, size, nodeType);
         
         // 转换为简化版的KnowledgeListVO
         IPage<KnowledgeListVO> simplifiedResult = result.convert(KnowledgeListVO::fromKnowledgeVO);
