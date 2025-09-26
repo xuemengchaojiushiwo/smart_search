@@ -620,81 +620,79 @@ def main():
         """迁移搜索历史数据"""
         print("\n🔄 开始迁移搜索历史数据...")
         
+        # 首先获取所有用户的ID和username映射关系
+        user_mapping = {}
+        user_cursor = self.sqlite_conn.cursor()
+        user_cursor.execute("SELECT id, username FROM app_user")
+        user_results = user_cursor.fetchall()
+        for user_id, username in user_results:
+            user_mapping[user_id] = username
+        print(f"  加载用户映射: {len(user_mapping)} 条记录")
+        
         cursor = self.sqlite_conn.cursor()
-        # 查询app_helpfulness表
+        # 查询app_helpfulness表，只查询需要的字段
         cursor.execute("""
             SELECT 
                 ah.id, 
                 ah."query", 
-                ah.comment,
-                ah.helpful,
                 ah.created,
-                ah.updated,
-                ah.user_id,
-                ah.day
+                ah.user_id
             FROM app_helpfulness ah
         """)
         search_histories = cursor.fetchall()
         
         mysql_cursor = self.mysql_conn.cursor()
         
+        # 创建新用户ID映射缓存
+        new_user_id_cache = {}
+        
         for history in search_histories:
-            old_id, query, comment, helpful, created, updated, user_id, day = history
+            old_id, query, created, user_id = history
             
             # 生成新的ID
             mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM search_history")
             new_id = mysql_cursor.fetchone()[0]
             
-            # 获取用户ID，使用user_id关联app_user表的username
+            # 使用缓存的用户映射获取新用户ID
             new_user_id = 1  # 默认用户ID
-            if user_id:
-                # 查询app_user表中对应的username
-                user_cursor = self.sqlite_conn.cursor()
-                user_cursor.execute("SELECT username FROM app_user WHERE id = ?", (user_id,))
-                user_result = user_cursor.fetchone()
-                
-                if user_result and user_result[0]:
-                    username = user_result[0]
-                    # 在新表中查询对应的用户ID
-                    mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
-                    user_result = mysql_cursor.fetchone()
-                    if user_result:
-                        new_user_id = user_result[0]
-                        print(f"  搜索历史 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
-                    else:
-                        print(f"  搜索历史 {old_id}: 用户 {username} 在新系统中不存在")
-                else:
-                    print(f"  搜索历史 {old_id}: user_id={user_id} 在app_user表中不存在")
             
-            # 准备helpful字段，如果为None则设为0
-            helpful_value = 0
-            if helpful is not None:
-                helpful_value = 1 if helpful else 0
+            # 如果用户ID已经在缓存中，直接使用
+            if user_id in new_user_id_cache:
+                new_user_id = new_user_id_cache[user_id]
+            elif user_id in user_mapping:
+                # 从用户映射中获取username
+                username = user_mapping[user_id]
+                # 在新表中查询对应的用户ID
+                mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
+                user_result = mysql_cursor.fetchone()
+                if user_result:
+                    new_user_id = user_result[0]
+                    # 将结果存入缓存
+                    new_user_id_cache[user_id] = new_user_id
+                    print(f"  搜索历史 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
+                else:
+                    print(f"  搜索历史 {old_id}: 用户 {username} 在新系统中不存在")
+            else:
+                print(f"  搜索历史 {old_id}: user_id={user_id} 在用户映射中不存在")
             
             insert_sql = """
             INSERT INTO search_history (
                 id, 
                 query, 
-                comment,
-                is_helpful,
                 user_id, 
-                search_date,
+                search_time,
                 created_time, 
-                updated_time, 
                 deleted
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """
             
             values = (
                 new_id,
                 query or '',
-                comment or '',
-                helpful_value,
                 new_user_id,
-                day or created or datetime.now(),  # 使用day作为搜索日期，如果没有则使用created
                 created or datetime.now(),
-                updated or created or datetime.now(),
+                created or datetime.now(),
                 0
             )
             
