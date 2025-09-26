@@ -74,9 +74,9 @@ public class UserService extends ServiceImpl<UserMapper, User> {
                 user.setStaffId(username);
                 user.setEmail(email != null ? email : username + "@example.com");
                 user.setDisplayName(displayName);
-                user.setRole(role != null ? role : "USER");
+                user.setRole(systemRole);
                 user.setSystemRole(systemRole != null ? systemRole : "BLOCKED");
-                user.setStaffRole("WPB");
+                user.setStaffRole(role);
                 user.setStatus(1);
                 user.setCreatedTime(now);
                 user.setUpdatedTime(now);

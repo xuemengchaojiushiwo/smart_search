@@ -159,8 +159,8 @@ class LegacyDataMigration:
             
             # 插入用户数据
             insert_sql = """
-            INSERT INTO users (id, username, email, staffid, system_role, display_name, profile_picture, role, password, last_login, status, created_time, deleted)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO users (id, username, email, staffid, staff_role, system_role, workspace, display_name, profile_picture, role, password, last_login, status, created_time, deleted)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             
             values = (
@@ -168,7 +168,9 @@ class LegacyDataMigration:
                 username or '',
                 email or '',
                 username or '',  # 使用 username 作为 staffid
-                'ADMIN' if (role or '').upper() == 'ADMIN' else 'USER',  # 默认或按历史role
+                role,  # staff_role 存储 role 字段的值
+                'Blocked',  # system_role 默认为 Blocked
+                'WPB',  # workspace 默认为 WPB
                 display_name,
                 profile_picture,
                 role,

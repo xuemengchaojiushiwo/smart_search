@@ -57,8 +57,7 @@ public class UserAdminController {
         u.setId(id);
         if (req.getSystemRole() != null) {
             u.setSystemRole(req.getSystemRole());
-            // 同步兼容字段
-            u.setRole(req.getSystemRole());
+
         }
         if (req.getWorkspace() != null) {
             u.setWorkspace(req.getWorkspace());

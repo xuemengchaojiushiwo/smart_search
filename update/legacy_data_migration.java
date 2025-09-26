@@ -159,16 +159,18 @@ class LegacyDataMigration:
             
             # 插入用户数据
             insert_sql = """
-            INSERT INTO users (id, username, email, staffid, system_role, display_name, profile_picture, role, password, last_login, status, created_time, deleted)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO users (id, username, email, staffid, staff_role, system_role, workspace, display_name, profile_picture, role, password, last_login, status, created_time, deleted)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            
+
             values = (
                 new_id,
                 username or '',
                 email or '',
                 username or '',  # 使用 username 作为 staffid
-                'ADMIN' if (role or '').upper() == 'ADMIN' else 'USER',  # 默认或按历史role
+                role,  # staff_role 存储 role 字段的值
+                'Blocked',  # system_role 默认为 Blocked
+                'WPB',  # workspace 默认为 WPB
                 display_name,
                 profile_picture,
                 role,
@@ -178,17 +180,17 @@ class LegacyDataMigration:
                 date_joined or datetime.now(),
                 0
             )
-            
+
             mysql_cursor.execute(insert_sql, values)
             self.id_mapping[f"user_{old_id}"] = new_id
-            
+
         self.mysql_conn.commit()
         print(f"✅ 用户数据迁移完成: {len(users)} 条记录")
-    
+
     def migrate_categories(self):
         """迁移分类数据 (转换为 knowledge 表的 folder 类型)"""
         print("\n🔄 开始迁移分类数据...")
-        
+
         cursor = self.sqlite_conn.cursor()
         cols = self._sqlite_columns('app_category')
         select_fields = [
@@ -198,17 +200,17 @@ class LegacyDataMigration:
         ]
         cursor.execute(f"SELECT {', '.join(select_fields)} FROM app_category ORDER BY length(path), path")
         categories = cursor.fetchall()
-        
+
         mysql_cursor = self.mysql_conn.cursor()
-        
+
         # 先创建所有分类节点，不设置 parent_id
         for category in categories:
             old_id, name, path, depth, created, updated = category
-            
+
             # 生成新的ID
             mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM knowledge")
             new_id = mysql_cursor.fetchone()[0]
-            
+
             # 根据path找到父节点
             parent_id = None
             if depth > 0:  # 如果深度大于0，说明有父节点
@@ -221,12 +223,12 @@ class LegacyDataMigration:
                         parent_old_id = parent_result[0]
                         if f"category_{parent_old_id}" in self.id_mapping:
                             parent_id = self.id_mapping[f"category_{parent_old_id}"]
-            
+
             insert_sql = """
             INSERT INTO knowledge (id, name, parent_id, node_type, created_by, created_time, updated_time, status, deleted)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            
+
             values = (
                 new_id,
                 name or '',
@@ -238,18 +240,18 @@ class LegacyDataMigration:
                 1,
                 0
             )
-            
+
             mysql_cursor.execute(insert_sql, values)
             self.id_mapping[f"category_{old_id}"] = new_id
             print(f"  创建分类: id={new_id}, name={name}, parent_id={parent_id}, path={path}, depth={depth}")
-            
+
         self.mysql_conn.commit()
         print(f"✅ 分类数据迁移完成: {len(categories)} 条记录")
-    
+
     def migrate_content(self):
         """迁移内容数据"""
         print("\n🔄 开始迁移内容数据...")
-        
+
         cursor = self.sqlite_conn.cursor()
         cols = self._sqlite_columns('app_contentitem')
         # 兼容历史命名：expired 或 expir_date
@@ -269,23 +271,23 @@ class LegacyDataMigration:
         ]
         cursor.execute(f"SELECT {', '.join(select_fields)} FROM app_contentitem")
         contents = cursor.fetchall()
-        
+
         mysql_cursor = self.mysql_conn.cursor()
-        
+
         for content in contents:
             old_id, title, text, keywords, created, updated, expired, category_id, creator_id = content
             safe_title = self._clean_text(title, f"content.title(id={old_id})")
             safe_text = self._clean_text(text, f"content.text(id={old_id})")
-            
+
             # 生成新的ID
             mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM knowledge")
             new_id = mysql_cursor.fetchone()[0]
-            
+
             # 转换标签
             tags = []
             if keywords:
                 tags = [tag.strip() for tag in keywords.split(',') if tag.strip()]
-            
+
             # 获取父分类ID
             parent_id = None
             if category_id:
@@ -301,7 +303,7 @@ class LegacyDataMigration:
                     cat_result = cursor.fetchone()
                     if cat_result:
                         print(f"  分类存在但未映射: {cat_result}")
-                        
+
             # 获取创建者ID，使用creator_id关联app_user表的username
             created_by = "admin"  # 默认创建者
             if creator_id:
@@ -309,7 +311,7 @@ class LegacyDataMigration:
                 creator_cursor = self.sqlite_conn.cursor()
                 creator_cursor.execute("SELECT username FROM app_user WHERE id = ?", (creator_id,))
                 creator_result = creator_cursor.fetchone()
-                
+
                 if creator_result and creator_result[0]:
                     username = creator_result[0]
                     # 在新表中查询对应的用户ID
@@ -322,12 +324,12 @@ class LegacyDataMigration:
                         print(f"  内容 {old_id}: 用户 {username} 在新系统中不存在或没有staffid")
                 else:
                     print(f"  内容 {old_id}: creator_id={creator_id} 在app_user表中不存在")
-            
+
             insert_sql = """
             INSERT INTO knowledge (id, name, description, parent_id, node_type, tags, created_by, created_time, updated_time, effective_end_time, status, deleted)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            
+
             values = (
                 new_id,
                 safe_title or '',
@@ -342,7 +344,7 @@ class LegacyDataMigration:
                 1,
                 0
             )
-            
+
             try:
                 mysql_cursor.execute(insert_sql, values)
                 self.id_mapping[f"content_{old_id}"] = new_id
@@ -356,44 +358,44 @@ class LegacyDataMigration:
                 print(f"   text_preview={repr(preview)}")
                 # 继续抛出以便上层回滚或终止
                 raise
-            
+
         self.mysql_conn.commit()
         print(f"✅ 内容数据迁移完成: {len(contents)} 条记录")
-    
+
     def migrate_uploads(self):
         """迁移文件上传数据"""
         print("\n🔄 开始迁移文件数据...")
-        
+
         cursor = self.sqlite_conn.cursor()
         cursor.execute("SELECT id, file, created, content_item_id FROM app_upload")
         uploads = cursor.fetchall()
-        
+
         mysql_cursor = self.mysql_conn.cursor()
-        
+
         for upload in uploads:
             old_id, file_path, created, content_item_id = upload
-            
+
             # 生成新的ID
             mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM attachments")
             new_id = mysql_cursor.fetchone()[0]
-            
+
             # 获取关联的知识ID
             knowledge_id = None
             if content_item_id and f"content_{content_item_id}" in self.id_mapping:
                 knowledge_id = self.id_mapping[f"content_{content_item_id}"]
-            
+
             if not knowledge_id:
                 continue  # 跳过没有关联内容的文件
-            
+
             # 提取文件名和类型
             file_name = os.path.basename(file_path) if file_path else f"file_{old_id}"
             file_type = os.path.splitext(file_name)[1] if file_name else ''
-            
+
             insert_sql = """
             INSERT INTO attachments (id, knowledge_id, file_name, file_path, file_size, file_type, upload_time, deleted)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """
-            
+
             values = (
                 new_id,
                 knowledge_id,
@@ -404,16 +406,16 @@ class LegacyDataMigration:
                 created or datetime.now(),
                 0
             )
-            
+
             mysql_cursor.execute(insert_sql, values)
-            
+
         self.mysql_conn.commit()
         print(f"✅ 文件数据迁移完成: {len(uploads)} 条记录")
-    
+
     def migrate_feedbacks(self):
         """迁移反馈数据"""
         print("\n🔄 开始迁移反馈数据...")
-        
+
         # 首先获取所有用户的ID和username映射关系
         user_mapping = {}
         user_cursor = self.sqlite_conn.cursor()
