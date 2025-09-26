@@ -414,6 +414,15 @@ class LegacyDataMigration:
         """迁移反馈数据"""
         print("\n🔄 开始迁移反馈数据...")
         
+        # 首先获取所有用户的ID和username映射关系
+        user_mapping = {}
+        user_cursor = self.sqlite_conn.cursor()
+        user_cursor.execute("SELECT id, username FROM app_user")
+        user_results = user_cursor.fetchall()
+        for user_id, username in user_results:
+            user_mapping[user_id] = username
+        print(f"  加载用户映射: {len(user_mapping)} 条记录")
+        
         cursor = self.sqlite_conn.cursor()
         # 获取app_feedback表的数据，包括creator_id字段
         cursor.execute("SELECT id, text, created, content_item_id, creator_id FROM app_feedback")
@@ -427,6 +436,9 @@ class LegacyDataMigration:
             'unclear': 'UNCLEAR',
             'incorrect': 'INCORRECT'
         }
+        
+        # 创建新用户ID映射缓存
+        new_user_id_cache = {}
         
         for feedback in feedbacks:
             old_id, text, created, content_item_id, creator_id = feedback
@@ -454,26 +466,27 @@ class LegacyDataMigration:
                     feedback_content = ''  # 如果是预定义类型，内容置空
                     break
             
-            # 获取用户ID，使用creator_id关联app_user表的username
+            # 使用缓存的用户映射获取新用户ID
             new_user_id = 1  # 默认用户ID
-            if creator_id:
-                # 查询app_user表中对应的username
-                creator_cursor = self.sqlite_conn.cursor()
-                creator_cursor.execute("SELECT username FROM app_user WHERE id = ?", (creator_id,))
-                creator_result = creator_cursor.fetchone()
-                
-                if creator_result and creator_result[0]:
-                    username = creator_result[0]
-                    # 在新表中查询对应的用户ID
-                    mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
-                    user_result = mysql_cursor.fetchone()
-                    if user_result:
-                        new_user_id = user_result[0]
-                        print(f"  反馈 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
-                    else:
-                        print(f"  反馈 {old_id}: 用户 {username} 在新系统中不存在")
+            
+            # 如果用户ID已经在缓存中，直接使用
+            if creator_id in new_user_id_cache:
+                new_user_id = new_user_id_cache[creator_id]
+            elif creator_id in user_mapping:
+                # 从用户映射中获取username
+                username = user_mapping[creator_id]
+                # 在新表中查询对应的用户ID
+                mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
+                user_result = mysql_cursor.fetchone()
+                if user_result:
+                    new_user_id = user_result[0]
+                    # 将结果存入缓存
+                    new_user_id_cache[creator_id] = new_user_id
+                    print(f"  反馈 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
                 else:
-                    print(f"  反馈 {old_id}: creator_id={creator_id} 在app_user表中不存在")
+                    print(f"  反馈 {old_id}: 用户 {username} 在新系统中不存在")
+            else:
+                print(f"  反馈 {old_id}: creator_id={creator_id} 在用户映射中不存在")
             
             insert_sql = """
             INSERT INTO knowledge_feedbacks (id, knowledge_id, user_id, content, feedback_type, created_time, deleted)
@@ -499,11 +512,23 @@ class LegacyDataMigration:
         """迁移收藏数据"""
         print("\n🔄 开始迁移收藏数据...")
         
+        # 首先获取所有用户的ID和username映射关系
+        user_mapping = {}
+        user_cursor = self.sqlite_conn.cursor()
+        user_cursor.execute("SELECT id, username FROM app_user")
+        user_results = user_cursor.fetchall()
+        for user_id, username in user_results:
+            user_mapping[user_id] = username
+        print(f"  加载用户映射: {len(user_mapping)} 条记录")
+        
         cursor = self.sqlite_conn.cursor()
         cursor.execute("SELECT id, contentitem_id, user_id FROM app_contentitem_user_favourited")
         favorites = cursor.fetchall()
         
         mysql_cursor = self.mysql_conn.cursor()
+        
+        # 创建新用户ID映射缓存
+        new_user_id_cache = {}
         
         for favorite in favorites:
             old_id, content_item_id, user_id = favorite
@@ -520,26 +545,27 @@ class LegacyDataMigration:
             if not knowledge_id:
                 continue
             
-            # 获取用户ID，使用user_id关联app_user表的username
+            # 使用缓存的用户映射获取新用户ID
             new_user_id = 1  # 默认用户ID
-            if user_id:
-                # 查询app_user表中对应的username
-                user_cursor = self.sqlite_conn.cursor()
-                user_cursor.execute("SELECT username FROM app_user WHERE id = ?", (user_id,))
-                user_result = user_cursor.fetchone()
-                
-                if user_result and user_result[0]:
-                    username = user_result[0]
-                    # 在新表中查询对应的用户ID
-                    mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
-                    user_result = mysql_cursor.fetchone()
-                    if user_result:
-                        new_user_id = user_result[0]
-                        print(f"  收藏 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
-                    else:
-                        print(f"  收藏 {old_id}: 用户 {username} 在新系统中不存在")
+            
+            # 如果用户ID已经在缓存中，直接使用
+            if user_id in new_user_id_cache:
+                new_user_id = new_user_id_cache[user_id]
+            elif user_id in user_mapping:
+                # 从用户映射中获取username
+                username = user_mapping[user_id]
+                # 在新表中查询对应的用户ID
+                mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
+                user_result = mysql_cursor.fetchone()
+                if user_result:
+                    new_user_id = user_result[0]
+                    # 将结果存入缓存
+                    new_user_id_cache[user_id] = new_user_id
+                    print(f"  收藏 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
                 else:
-                    print(f"  收藏 {old_id}: user_id={user_id} 在app_user表中不存在")
+                    print(f"  收藏 {old_id}: 用户 {username} 在新系统中不存在")
+            else:
+                print(f"  收藏 {old_id}: user_id={user_id} 在用户映射中不存在")
             
             insert_sql = """
             INSERT INTO knowledge_favorites (id, knowledge_id, user_id, created_time, deleted)
