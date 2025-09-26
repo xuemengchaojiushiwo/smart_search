@@ -107,23 +107,25 @@ class LegacyDataMigration:
         """
         解析 path 编码为层级结构
         例如: 00010001000P00030004 -> [1, 1, 16, 3, 4]
+        或者简单的: 0001 -> [1], 00010001 -> [1, 1]
         """
         if not path:
             return []
         
-        # 按 000 分割 path
-        parts = path.split('000')
         hierarchy = []
-        
-        for part in parts:
-            if not part:
-                continue
-            # 将字母转换为数字
-            if part.isdigit():
-                hierarchy.append(int(part))
-            else:
-                # 字母转数字: A=10, B=11, ..., P=16, ...
-                hierarchy.append(ord(part) - ord('A') + 10)
+        # 每4个字符为一个层级
+        for i in range(0, len(path), 4):
+            if i + 4 <= len(path):
+                segment = path[i:i+4]
+                if segment.isdigit():
+                    hierarchy.append(int(segment))
+                else:
+                    # 处理包含字母的情况
+                    for c in segment:
+                        if c.isalpha():
+                            hierarchy.append(ord(c) - ord('A') + 10)
+                        elif c.isdigit():
+                            hierarchy.append(int(c))
         
         return hierarchy
     
@@ -194,7 +196,7 @@ class LegacyDataMigration:
             ('created' if 'created' in cols else "datetime('now') AS created"),
             ('updated' if 'updated' in cols else "NULL AS updated"),
         ]
-        cursor.execute(f"SELECT {', '.join(select_fields)} FROM app_category ORDER BY path")
+        cursor.execute(f"SELECT {', '.join(select_fields)} FROM app_category ORDER BY length(path), path")
         categories = cursor.fetchall()
         
         mysql_cursor = self.mysql_conn.cursor()
@@ -207,6 +209,19 @@ class LegacyDataMigration:
             mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM knowledge")
             new_id = mysql_cursor.fetchone()[0]
             
+            # 根据path找到父节点
+            parent_id = None
+            if depth > 0:  # 如果深度大于0，说明有父节点
+                # 截取父节点的path
+                if len(path) >= 4:  # 确保path长度足够
+                    parent_path = path[:-4]  # 去掉最后4个字符即为父节点path
+                    cursor.execute("SELECT id FROM app_category WHERE path = ?", (parent_path,))
+                    parent_result = cursor.fetchone()
+                    if parent_result:
+                        parent_old_id = parent_result[0]
+                        if f"category_{parent_old_id}" in self.id_mapping:
+                            parent_id = self.id_mapping[f"category_{parent_old_id}"]
+            
             insert_sql = """
             INSERT INTO knowledge (id, name, parent_id, node_type, created_by, created_time, updated_time, status, deleted)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -215,7 +230,7 @@ class LegacyDataMigration:
             values = (
                 new_id,
                 name or '',
-                None,  # 先不设置 parent_id
+                parent_id,  # 直接设置parent_id
                 'folder',
                 'admin',  # 默认创建人
                 created or datetime.now(),
@@ -226,31 +241,8 @@ class LegacyDataMigration:
             
             mysql_cursor.execute(insert_sql, values)
             self.id_mapping[f"category_{old_id}"] = new_id
+            print(f"  创建分类: id={new_id}, name={name}, parent_id={parent_id}, path={path}, depth={depth}")
             
-        self.mysql_conn.commit()
-        
-        # 现在设置 parent_id 关系
-        for category in categories:
-            old_id, name, path, depth, created, updated = category
-            new_id = self.id_mapping[f"category_{old_id}"]
-            
-            # 解析 path 获取父节点
-            hierarchy = self.parse_path_to_hierarchy(path)
-            if len(hierarchy) > 1:
-                # 找到父节点的 path
-                parent_path = '000'.join([''] + [str(h) if h < 10 else chr(h - 10 + ord('A')) for h in hierarchy[:-1]])
-                
-                # 查找父节点
-                cursor.execute("SELECT id FROM app_category WHERE path = ?", (parent_path,))
-                parent_result = cursor.fetchone()
-                if parent_result:
-                    parent_old_id = parent_result[0]
-                    parent_new_id = self.id_mapping[f"category_{parent_old_id}"]
-                    
-                    # 更新 parent_id
-                    update_sql = "UPDATE knowledge SET parent_id = %s WHERE id = %s"
-                    mysql_cursor.execute(update_sql, (parent_new_id, new_id))
-        
         self.mysql_conn.commit()
         print(f"✅ 分类数据迁移完成: {len(categories)} 条记录")
     
@@ -273,6 +265,7 @@ class LegacyDataMigration:
             ('updated' if 'updated' in cols else "NULL AS updated"),
             expired_expr,
             ('category_id' if 'category_id' in cols else "NULL AS category_id"),
+            ('creator_id' if 'creator_id' in cols else "NULL AS creator_id"),
         ]
         cursor.execute(f"SELECT {', '.join(select_fields)} FROM app_contentitem")
         contents = cursor.fetchall()
@@ -280,7 +273,7 @@ class LegacyDataMigration:
         mysql_cursor = self.mysql_conn.cursor()
         
         for content in contents:
-            old_id, title, text, keywords, created, updated, expired, category_id = content
+            old_id, title, text, keywords, created, updated, expired, category_id, creator_id = content
             safe_title = self._clean_text(title, f"content.title(id={old_id})")
             safe_text = self._clean_text(text, f"content.text(id={old_id})")
             
@@ -295,8 +288,40 @@ class LegacyDataMigration:
             
             # 获取父分类ID
             parent_id = None
-            if category_id and f"category_{category_id}" in self.id_mapping:
-                parent_id = self.id_mapping[f"category_{category_id}"]
+            if category_id:
+                # 打印调试信息
+                print(f"  内容 {old_id}: 关联分类ID={category_id}, 映射键={f'category_{category_id}'}")
+                if f"category_{category_id}" in self.id_mapping:
+                    parent_id = self.id_mapping[f"category_{category_id}"]
+                    print(f"  内容 {old_id}: 找到父分类ID={parent_id}")
+                else:
+                    print(f"  内容 {old_id}: 未找到父分类映射")
+                    # 尝试查询分类是否存在
+                    cursor.execute("SELECT id, name, path FROM app_category WHERE id = ?", (category_id,))
+                    cat_result = cursor.fetchone()
+                    if cat_result:
+                        print(f"  分类存在但未映射: {cat_result}")
+                        
+            # 获取创建者ID，使用creator_id关联app_user表的username
+            created_by = "admin"  # 默认创建者
+            if creator_id:
+                # 查询app_user表中对应的username
+                creator_cursor = self.sqlite_conn.cursor()
+                creator_cursor.execute("SELECT username FROM app_user WHERE id = ?", (creator_id,))
+                creator_result = creator_cursor.fetchone()
+                
+                if creator_result and creator_result[0]:
+                    username = creator_result[0]
+                    # 在新表中查询对应的用户ID
+                    mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
+                    user_result = mysql_cursor.fetchone()
+                    if user_result:
+                        created_by = username
+                        print(f"  内容 {old_id}: 找到创建者 {username}, created_by={created_by}")
+                    else:
+                        print(f"  内容 {old_id}: 用户 {username} 在新系统中不存在或没有staffid")
+                else:
+                    print(f"  内容 {old_id}: creator_id={creator_id} 在app_user表中不存在")
             
             insert_sql = """
             INSERT INTO knowledge (id, name, description, parent_id, node_type, tags, created_by, created_time, updated_time, effective_end_time, status, deleted)
@@ -310,7 +335,7 @@ class LegacyDataMigration:
                 parent_id,
                 'doc',
                 json.dumps(tags, ensure_ascii=False),
-                'admin',
+                created_by,
                 created or datetime.now(),
                 updated,
                 expired,
@@ -321,6 +346,7 @@ class LegacyDataMigration:
             try:
                 mysql_cursor.execute(insert_sql, values)
                 self.id_mapping[f"content_{old_id}"] = new_id
+                print(f"  创建内容: id={new_id}, title={safe_title[:30]}..., parent_id={parent_id}")
             except Exception as e:
                 # 打印问题数据，便于定位
                 preview = (safe_text or '')[:120]
@@ -389,13 +415,21 @@ class LegacyDataMigration:
         print("\n🔄 开始迁移反馈数据...")
         
         cursor = self.sqlite_conn.cursor()
-        cursor.execute("SELECT id, text, created, content_item_id FROM app_feedback")
+        # 获取app_feedback表的数据，包括creator_id字段
+        cursor.execute("SELECT id, text, created, content_item_id, creator_id FROM app_feedback")
         feedbacks = cursor.fetchall()
         
         mysql_cursor = self.mysql_conn.cursor()
         
+        # 定义反馈类型映射（大小写不敏感）
+        feedback_types = {
+            'out of date': 'OUT_OF_DATE',
+            'unclear': 'UNCLEAR',
+            'incorrect': 'INCORRECT'
+        }
+        
         for feedback in feedbacks:
-            old_id, text, created, content_item_id = feedback
+            old_id, text, created, content_item_id, creator_id = feedback
             
             # 生成新的ID
             mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM knowledge_feedbacks")
@@ -409,16 +443,49 @@ class LegacyDataMigration:
             if not knowledge_id:
                 continue
             
+            # 判断反馈类型，大小写不敏感
+            feedback_type = None
+            feedback_content = text or ''
+            
+            # 检查是否为预定义的反馈类型
+            for key, value in feedback_types.items():
+                if feedback_content.lower().strip() == key.lower():
+                    feedback_type = value
+                    feedback_content = ''  # 如果是预定义类型，内容置空
+                    break
+            
+            # 获取用户ID，使用creator_id关联app_user表的username
+            new_user_id = 1  # 默认用户ID
+            if creator_id:
+                # 查询app_user表中对应的username
+                creator_cursor = self.sqlite_conn.cursor()
+                creator_cursor.execute("SELECT username FROM app_user WHERE id = ?", (creator_id,))
+                creator_result = creator_cursor.fetchone()
+                
+                if creator_result and creator_result[0]:
+                    username = creator_result[0]
+                    # 在新表中查询对应的用户ID
+                    mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
+                    user_result = mysql_cursor.fetchone()
+                    if user_result:
+                        new_user_id = user_result[0]
+                        print(f"  反馈 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
+                    else:
+                        print(f"  反馈 {old_id}: 用户 {username} 在新系统中不存在")
+                else:
+                    print(f"  反馈 {old_id}: creator_id={creator_id} 在app_user表中不存在")
+            
             insert_sql = """
-            INSERT INTO knowledge_feedbacks (id, knowledge_id, user_id, content, created_time, deleted)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO knowledge_feedbacks (id, knowledge_id, user_id, content, feedback_type, created_time, deleted)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
             
             values = (
                 new_id,
                 knowledge_id,
-                1,  # 默认用户ID
-                text or '',
+                new_user_id,
+                feedback_content,
+                feedback_type,  # 新增反馈类型字段
                 created or datetime.now(),
                 0
             )
@@ -453,10 +520,26 @@ class LegacyDataMigration:
             if not knowledge_id:
                 continue
             
-            # 获取用户ID
+            # 获取用户ID，使用user_id关联app_user表的username
             new_user_id = 1  # 默认用户ID
-            if f"user_{user_id}" in self.id_mapping:
-                new_user_id = self.id_mapping[f"user_{user_id}"]
+            if user_id:
+                # 查询app_user表中对应的username
+                user_cursor = self.sqlite_conn.cursor()
+                user_cursor.execute("SELECT username FROM app_user WHERE id = ?", (user_id,))
+                user_result = user_cursor.fetchone()
+                
+                if user_result and user_result[0]:
+                    username = user_result[0]
+                    # 在新表中查询对应的用户ID
+                    mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
+                    user_result = mysql_cursor.fetchone()
+                    if user_result:
+                        new_user_id = user_result[0]
+                        print(f"  收藏 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
+                    else:
+                        print(f"  收藏 {old_id}: 用户 {username} 在新系统中不存在")
+                else:
+                    print(f"  收藏 {old_id}: user_id={user_id} 在app_user表中不存在")
             
             insert_sql = """
             INSERT INTO knowledge_favorites (id, knowledge_id, user_id, created_time, deleted)
@@ -493,6 +576,7 @@ class LegacyDataMigration:
             self.migrate_uploads()
             self.migrate_feedbacks()
             self.migrate_favorites()
+            self.migrate_search_history()
             
             print("\n✅ 数据迁移完成！")
             print(f"📊 ID映射关系已保存，共 {len(self.id_mapping)} 个映射")
@@ -515,16 +599,114 @@ def main():
         print("❌ SQLite 数据库文件不存在！")
         return
     
+    # 提示用户输入MySQL配置
+    host = input("请输入MySQL主机地址 [localhost]: ").strip() or 'localhost'
+    user = input("请输入MySQL用户名 [root]: ").strip() or 'root'
+    password = input("请输入MySQL密码 [xmc131455]: ").strip() or 'xmc131455'
+    database = input("请输入MySQL数据库名 [knowledge_base]: ").strip() or 'knowledge_base'
+    
     mysql_config = {
-        'host': 'localhost',
-        'user': 'root',
-        'password': 'xmc131455',
-        'database': 'knowledge_base'
+        'host': host,
+        'user': user,
+        'password': password,
+        'database': database
     }
     
     # 运行迁移
     migration = LegacyDataMigration(sqlite_db_path, mysql_config)
     migration.run_migration()
+
+    def migrate_search_history(self):
+        """迁移搜索历史数据"""
+        print("\n🔄 开始迁移搜索历史数据...")
+        
+        cursor = self.sqlite_conn.cursor()
+        # 查询app_helpfulness表
+        cursor.execute("""
+            SELECT 
+                ah.id, 
+                ah."query", 
+                ah.comment,
+                ah.helpful,
+                ah.created,
+                ah.updated,
+                ah.user_id,
+                ah.day
+            FROM app_helpfulness ah
+        """)
+        search_histories = cursor.fetchall()
+        
+        mysql_cursor = self.mysql_conn.cursor()
+        
+        for history in search_histories:
+            old_id, query, comment, helpful, created, updated, user_id, day = history
+            
+            # 生成新的ID
+            mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM search_history")
+            new_id = mysql_cursor.fetchone()[0]
+            
+            # 获取用户ID，使用user_id关联app_user表的username
+            new_user_id = 1  # 默认用户ID
+            if user_id:
+                # 查询app_user表中对应的username
+                user_cursor = self.sqlite_conn.cursor()
+                user_cursor.execute("SELECT username FROM app_user WHERE id = ?", (user_id,))
+                user_result = user_cursor.fetchone()
+                
+                if user_result and user_result[0]:
+                    username = user_result[0]
+                    # 在新表中查询对应的用户ID
+                    mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
+                    user_result = mysql_cursor.fetchone()
+                    if user_result:
+                        new_user_id = user_result[0]
+                        print(f"  搜索历史 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
+                    else:
+                        print(f"  搜索历史 {old_id}: 用户 {username} 在新系统中不存在")
+                else:
+                    print(f"  搜索历史 {old_id}: user_id={user_id} 在app_user表中不存在")
+            
+            # 准备helpful字段，如果为None则设为0
+            helpful_value = 0
+            if helpful is not None:
+                helpful_value = 1 if helpful else 0
+            
+            insert_sql = """
+            INSERT INTO search_history (
+                id, 
+                query, 
+                comment,
+                is_helpful,
+                user_id, 
+                search_date,
+                created_time, 
+                updated_time, 
+                deleted
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            values = (
+                new_id,
+                query or '',
+                comment or '',
+                helpful_value,
+                new_user_id,
+                day or created or datetime.now(),  # 使用day作为搜索日期，如果没有则使用created
+                created or datetime.now(),
+                updated or created or datetime.now(),
+                0
+            )
+            
+            try:
+                mysql_cursor.execute(insert_sql, values)
+                print(f"  创建搜索历史: id={new_id}, query={query[:30] if query else ''}")
+            except Exception as e:
+                print(f"❗ 搜索历史写入失败 id={old_id}, new_id={new_id}, error={e}")
+                raise
+            
+        self.mysql_conn.commit()
+        print(f"✅ 搜索历史数据迁移完成: {len(search_histories)} 条记录")
 
 if __name__ == "__main__":
     main()

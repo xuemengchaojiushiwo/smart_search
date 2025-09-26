@@ -273,8 +273,10 @@ public class KnowledgeService {
      */
     public List<com.knowledge.vo.KnowledgeTreeVO> getKnowledgeTree() {
         LambdaQueryWrapper<Knowledge> rootWrapper = new LambdaQueryWrapper<Knowledge>()
+                .select(Knowledge::getId, Knowledge::getName, Knowledge::getParentId, Knowledge::getNodeType)  // 只查询必要的字段
                 .eq(Knowledge::getDeleted, 0)
                 .and(w -> w.isNull(Knowledge::getParentId).or().eq(Knowledge::getParentId, 0L))
+                .eq(Knowledge::getNodeType, "folder")  // 只查询folder类型
                 .orderByAsc(Knowledge::getNodeType)
                 .orderByDesc(Knowledge::getUpdatedTime);
         List<Knowledge> roots = knowledgeMapper.selectList(rootWrapper);
@@ -287,10 +289,13 @@ public class KnowledgeService {
         node.setName(k.getName());
         node.setParentId(k.getParentId());
         node.setNodeType(k.getNodeType());
-        // 无论节点类型，均加载子节点，保证“文档型”节点也能作为容器显示其子项
+        // 仅加载folder类型的子节点，其他类型在点击展开时才加载
+        // 使用选择性查询，只查询必要的字段（id、name、parentId、nodeType）
         List<Knowledge> children = knowledgeMapper.selectList(new LambdaQueryWrapper<Knowledge>()
+                .select(Knowledge::getId, Knowledge::getName, Knowledge::getParentId, Knowledge::getNodeType)
                 .eq(Knowledge::getDeleted, 0)
                 .eq(Knowledge::getParentId, k.getId())
+                .eq(Knowledge::getNodeType, "folder")  // 只查询folder类型
                 .orderByAsc(Knowledge::getNodeType)
                 .orderByDesc(Knowledge::getUpdatedTime));
         node.setChildren(children.isEmpty() ? java.util.Collections.emptyList() : children.stream().map(this::toTreeNode).collect(Collectors.toList()));
