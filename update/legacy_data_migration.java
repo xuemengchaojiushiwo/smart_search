@@ -473,18 +473,13 @@ class LegacyDataMigration:
             if creator_id in new_user_id_cache:
                 new_user_id = new_user_id_cache[creator_id]
             elif creator_id in user_mapping:
-                # 从用户映射中获取username
+                # 从用户映射中获取username（工号）
                 username = user_mapping[creator_id]
-                # 在新表中查询对应的用户ID
-                mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
-                user_result = mysql_cursor.fetchone()
-                if user_result:
-                    new_user_id = user_result[0]
-                    # 将结果存入缓存
-                    new_user_id_cache[creator_id] = new_user_id
-                    print(f"  反馈 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
-                else:
-                    print(f"  反馈 {old_id}: 用户 {username} 在新系统中不存在")
+                # 直接使用username作为user_id（因为username就是工号）
+                new_user_id = username
+                # 将结果存入缓存
+                new_user_id_cache[creator_id] = new_user_id
+                print(f"  反馈 {old_id}: 找到用户 {username}, 使用工号作为user_id")
             else:
                 print(f"  反馈 {old_id}: creator_id={creator_id} 在用户映射中不存在")
 
@@ -552,18 +547,13 @@ class LegacyDataMigration:
             if user_id in new_user_id_cache:
                 new_user_id = new_user_id_cache[user_id]
             elif user_id in user_mapping:
-                # 从用户映射中获取username
+                # 从用户映射中获取username（工号）
                 username = user_mapping[user_id]
-                # 在新表中查询对应的用户ID
-                mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
-                user_result = mysql_cursor.fetchone()
-                if user_result:
-                    new_user_id = user_result[0]
-                    # 将结果存入缓存
-                    new_user_id_cache[user_id] = new_user_id
-                    print(f"  收藏 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
-                else:
-                    print(f"  收藏 {old_id}: 用户 {username} 在新系统中不存在")
+                # 直接使用username作为user_id（因为username就是工号）
+                new_user_id = username
+                # 将结果存入缓存
+                new_user_id_cache[user_id] = new_user_id
+                print(f"  收藏 {old_id}: 找到用户 {username}, 使用工号作为user_id")
             else:
                 print(f"  收藏 {old_id}: user_id={user_id} 在用户映射中不存在")
 
@@ -585,6 +575,88 @@ class LegacyDataMigration:
         self.mysql_conn.commit()
         print(f"✅ 收藏数据迁移完成: {len(favorites)} 条记录")
 
+    def migrate_search_history(self):
+        """迁移搜索历史数据"""
+        print("\n🔄 开始迁移搜索历史数据...")
+
+        # 首先获取所有用户的ID和username映射关系
+        user_mapping = {}
+        user_cursor = self.sqlite_conn.cursor()
+        user_cursor.execute("SELECT id, username FROM app_user")
+        user_results = user_cursor.fetchall()
+        for user_id, username in user_results:
+            user_mapping[user_id] = username
+        print(f"  加载用户映射: {len(user_mapping)} 条记录")
+
+        cursor = self.sqlite_conn.cursor()
+        # 查询app_helpfulness表，只查询需要的字段
+        cursor.execute("""
+            SELECT
+                ah.id,
+                ah."query",
+                ah.created,
+                ah.user_id
+            FROM app_helpfulness ah
+        """)
+        search_histories = cursor.fetchall()
+
+        mysql_cursor = self.mysql_conn.cursor()
+
+        # 创建新用户ID映射缓存
+        new_user_id_cache = {}
+
+        for history in search_histories:
+            old_id, query, created, user_id = history
+
+            # 生成新的ID
+            mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM search_history")
+            new_id = mysql_cursor.fetchone()[0]
+
+            # 使用缓存的用户映射获取新用户ID
+            new_user_id = 1  # 默认用户ID
+
+            # 如果用户ID已经在缓存中，直接使用
+            if user_id in new_user_id_cache:
+                new_user_id = new_user_id_cache[user_id]
+            elif user_id in user_mapping:
+                # 从用户映射中获取username（工号）
+                username = user_mapping[user_id]
+                # 直接使用username作为user_id（因为username就是工号）
+                new_user_id = username
+                # 将结果存入缓存
+                new_user_id_cache[user_id] = new_user_id
+                print(f"  搜索历史 {old_id}: 找到用户 {username}, 使用工号作为user_id")
+            else:
+                print(f"  搜索历史 {old_id}: user_id={user_id} 在用户映射中不存在")
+
+            insert_sql = """
+            INSERT INTO search_history (
+                id,
+                query,
+                user_id,
+                search_time,
+                deleted
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            """
+
+            values = (
+                new_id,
+                query or '',
+                new_user_id,
+                created or datetime.now(),
+                0
+            )
+
+            try:
+                mysql_cursor.execute(insert_sql, values)
+                print(f"  创建搜索历史: id={new_id}, query={query[:30] if query else ''}")
+            except Exception as e:
+                print(f"❗ 搜索历史写入失败 id={old_id}, new_id={new_id}, error={e}")
+                raise
+
+        self.mysql_conn.commit()
+        print(f"✅ 搜索历史数据迁移完成: {len(search_histories)} 条记录")
     def run_migration(self):
         """运行完整迁移"""
         print("🚀 开始历史系统数据迁移...")
@@ -642,95 +714,6 @@ def main():
     migration = LegacyDataMigration(sqlite_db_path, mysql_config)
     migration.run_migration()
 
-    def migrate_search_history(self):
-        """迁移搜索历史数据"""
-        print("\n🔄 开始迁移搜索历史数据...")
-
-        # 首先获取所有用户的ID和username映射关系
-        user_mapping = {}
-        user_cursor = self.sqlite_conn.cursor()
-        user_cursor.execute("SELECT id, username FROM app_user")
-        user_results = user_cursor.fetchall()
-        for user_id, username in user_results:
-            user_mapping[user_id] = username
-        print(f"  加载用户映射: {len(user_mapping)} 条记录")
-
-        cursor = self.sqlite_conn.cursor()
-        # 查询app_helpfulness表，只查询需要的字段
-        cursor.execute("""
-            SELECT
-                ah.id,
-                ah."query",
-                ah.created,
-                ah.user_id
-            FROM app_helpfulness ah
-        """)
-        search_histories = cursor.fetchall()
-
-        mysql_cursor = self.mysql_conn.cursor()
-
-        # 创建新用户ID映射缓存
-        new_user_id_cache = {}
-
-        for history in search_histories:
-            old_id, query, created, user_id = history
-
-            # 生成新的ID
-            mysql_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM search_history")
-            new_id = mysql_cursor.fetchone()[0]
-
-            # 使用缓存的用户映射获取新用户ID
-            new_user_id = 1  # 默认用户ID
-
-            # 如果用户ID已经在缓存中，直接使用
-            if user_id in new_user_id_cache:
-                new_user_id = new_user_id_cache[user_id]
-            elif user_id in user_mapping:
-                # 从用户映射中获取username
-                username = user_mapping[user_id]
-                # 在新表中查询对应的用户ID
-                mysql_cursor.execute("SELECT id FROM users WHERE staffid = %s", (username,))
-                user_result = mysql_cursor.fetchone()
-                if user_result:
-                    new_user_id = user_result[0]
-                    # 将结果存入缓存
-                    new_user_id_cache[user_id] = new_user_id
-                    print(f"  搜索历史 {old_id}: 找到用户 {username}, 新ID={new_user_id}")
-                else:
-                    print(f"  搜索历史 {old_id}: 用户 {username} 在新系统中不存在")
-            else:
-                print(f"  搜索历史 {old_id}: user_id={user_id} 在用户映射中不存在")
-
-            insert_sql = """
-            INSERT INTO search_history (
-                id,
-                query,
-                user_id,
-                search_time,
-                created_time,
-                deleted
-            )
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """
-
-            values = (
-                new_id,
-                query or '',
-                new_user_id,
-                created or datetime.now(),
-                created or datetime.now(),
-                0
-            )
-            
-            try:
-                mysql_cursor.execute(insert_sql, values)
-                print(f"  创建搜索历史: id={new_id}, query={query[:30] if query else ''}")
-            except Exception as e:
-                print(f"❗ 搜索历史写入失败 id={old_id}, new_id={new_id}, error={e}")
-                raise
-            
-        self.mysql_conn.commit()
-        print(f"✅ 搜索历史数据迁移完成: {len(search_histories)} 条记录")
 
 if __name__ == "__main__":
     main()
