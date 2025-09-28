@@ -7,6 +7,7 @@ import com.knowledge.entity.Knowledge;
 import com.knowledge.service.KnowledgeService;
 import com.knowledge.util.SecurityUtils;
 import com.knowledge.vo.ApiResponse;
+import com.knowledge.entity.User;
 import com.knowledge.vo.KnowledgeVO;
 import com.knowledge.vo.KnowledgeListVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -42,33 +43,80 @@ public class KnowledgeController {
     @Autowired
     private com.knowledge.service.AttachmentService attachmentService;
     @Autowired
-    private com.knowledge.service.UserDeptRoleService userDeptRoleService;
-    @Autowired
     private com.knowledge.service.UserService userService;
 
-    private List<String> resolveAllowedWorkspaces(String userId) {
+
+    /**
+     * 解析工作空间列表
+     * @param userId 用户ID或用户名
+     * @param workspace 前端传入的工作空间参数，如果为null则使用用户默认工作空间
+     * @return 工作空间列表
+     */
+    private List<String> resolveWorkspaces(String userId, String workspace) {
+        // 如果前端指定了工作空间，直接使用
+        if (workspace != null && !workspace.trim().isEmpty()) {
+            List<String> list = new ArrayList<>();
+            list.add(workspace.trim());
+            return list;
+        }
+        
+        // 否则使用用户默认工作空间
         try {
             if (userId == null) return null;
-            Long uid = null;
-            try { uid = Long.valueOf(userId); } catch (Exception ignore) {}
-            if (uid != null) {
-                List<com.knowledge.entity.UserDeptRole> records = userDeptRoleService.listByUser(uid);
-                if (records != null && !records.isEmpty()) {
-                    List<String> list = new ArrayList<>();
-                    for (com.knowledge.entity.UserDeptRole r : records) {
-                        if (r.getDept() != null && !r.getDept().trim().isEmpty()) list.add(r.getDept().trim());
-                    }
-                    if (!list.isEmpty()) return list;
-                }
-                com.knowledge.entity.User u = userService.getById(uid);
-                if (u != null && u.getWorkspace() != null && !u.getWorkspace().trim().isEmpty()) {
-                    String[] parts = u.getWorkspace().split(",");
-                    List<String> list = new ArrayList<>();
-                    for (String p : parts) { if (!p.trim().isEmpty()) list.add(p.trim()); }
-                    if (!list.isEmpty()) return list;
+            
+            User user = null;
+            // 先尝试作为用户名查找（因为resolveUserIdFromHeader返回的是用户名）
+            user = userService.findByUsername(userId);
+            
+            if (user == null) {
+                // 如果用户名查找失败，尝试作为用户ID解析
+                try {
+                    Long uid = Long.valueOf(userId);
+                    user = userService.getById(uid);
+                } catch (Exception ignore) {
+                    // 解析失败，保持user为null
                 }
             }
-        } catch (Exception ignore) {}
+            
+            if (user != null) {
+                return userService.getAllowedWorkspaces(user.getId());
+            }
+        } catch (Exception e) {
+            log.warn("获取用户工作空间失败: userId={}, error={}", userId, e.getMessage());
+        }
+        return null;
+    }
+    
+    private String resolveWorkspaceString(String userId, String workspace) {
+        // 如果前端指定了工作空间，直接使用
+        if (workspace != null && !workspace.trim().isEmpty()) {
+            return workspace.trim();
+        }
+        
+        // 否则使用用户默认工作空间字符串
+        try {
+            if (userId == null) return null;
+            
+            User user = null;
+            // 先尝试作为用户名查找（因为resolveUserIdFromHeader返回的是用户名）
+            user = userService.findByUsername(userId);
+            
+            if (user == null) {
+                // 如果用户名查找失败，尝试作为用户ID解析
+                try {
+                    Long uid = Long.valueOf(userId);
+                    user = userService.getById(uid);
+                } catch (Exception ignore) {
+                    // 解析失败，保持user为null
+                }
+            }
+            
+            if (user != null && user.getWorkspace() != null && !user.getWorkspace().trim().isEmpty()) {
+                return user.getWorkspace().trim();
+            }
+        } catch (Exception e) {
+            log.warn("获取用户工作空间失败: userId={}, error={}", userId, e.getMessage());
+        }
         return null;
     }
 
@@ -89,8 +137,26 @@ public class KnowledgeController {
     @PostMapping
     @Operation(summary = "创建知识", description = "创建新的知识条目")
     public ApiResponse<Knowledge> createKnowledge(
-            @Parameter(description = "知识信息", required = true) @Valid @RequestBody KnowledgeDTO dto) {
-        Knowledge knowledge = knowledgeService.createKnowledge(dto, "admin");
+            @Parameter(description = "知识信息", required = true) @Valid @RequestBody KnowledgeDTO dto,
+            @Parameter(description = "工作空间，不传则默认为ALL", example = "WPB") @RequestParam(required = false) String workspace) {
+        
+        // 检查当前用户是否为admin
+        String currentUsername = SecurityUtils.getCurrentUsername();
+        if (currentUsername == null) {
+            return ApiResponse.error("未登录");
+        }
+        
+        User currentUser = userService.findByUsername(currentUsername);
+        if (currentUser == null || !"Admin".equals(currentUser.getSystemRole())) {
+            return ApiResponse.error("权限不足，只有admin可以创建知识");
+        }
+        
+        // 设置默认工作空间为ALL
+        if (workspace == null || workspace.trim().isEmpty()) {
+            workspace = "ALL";
+        }
+        
+        Knowledge knowledge = knowledgeService.createKnowledge(dto, currentUsername, workspace);
         return ApiResponse.success("创建知识成功", knowledge);
     }
     
@@ -178,16 +244,48 @@ public class KnowledgeController {
     public ApiResponse<IPage<KnowledgeListVO>> getKnowledgeList(
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size,
-            @Parameter(description = "节点类型，可选值：folder/doc", example = "folder") @RequestParam(required = false) String nodeType) {
+            @Parameter(description = "节点类型，可选值：folder/doc", example = "folder") @RequestParam(required = false) String nodeType,
+            @Parameter(description = "工作空间，不传则使用用户默认工作空间", example = "WPB") @RequestParam(required = false) String workspace) {
         org.springframework.web.context.request.ServletRequestAttributes attributes = 
             (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
         javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
         String userId = resolveUserIdFromHeader(req);
-        List<String> allowed = resolveAllowedWorkspaces(userId);
+        
+        // 检查当前用户是否为admin
+        boolean isAdmin = false;
+        if (userId != null) {
+            try {
+                User user = userService.findByUsername(userId);
+                if (user == null) {
+                    // 如果用户名查找失败，尝试作为用户ID解析
+                    try {
+                        Long uid = Long.valueOf(userId);
+                        user = userService.getById(uid);
+                    } catch (Exception ignore) {
+                        // 解析失败，保持user为null
+                    }
+                }
+                if (user != null && "Admin".equals(user.getSystemRole())) {
+                    isAdmin = true;
+                }
+            } catch (Exception e) {
+                log.warn("检查用户角色失败: userId={}, error={}", userId, e.getMessage());
+            }
+        }
+        
+        // 解析工作空间：admin用户不受工作空间限制
+        String workspaceString = null;
+        if (!isAdmin) {
+            workspaceString = resolveWorkspaceString(userId, workspace);
+            // 如果用户没有工作空间权限，传递空字符串而不是null
+            if (workspaceString == null) {
+                workspaceString = "";
+            }
+        }
         
         // 修改为只获取顶层目录（parentId=null或0的记录）
         // 如果指定了nodeType，则按节点类型过滤
-        IPage<KnowledgeVO> result = knowledgeService.getChildrenFiltered(null, page, size, allowed, nodeType);
+        IPage<KnowledgeVO> result = knowledgeService.getChildrenFilteredByWorkspaceString(null, page, size, workspaceString, nodeType);
         
         // 转换为简化版的KnowledgeListVO
         IPage<KnowledgeListVO> simplifiedResult = result.convert(KnowledgeListVO::fromKnowledgeVO);
@@ -200,15 +298,43 @@ public class KnowledgeController {
             @Parameter(description = "父知识ID", required = true, example = "1") @PathVariable Long parentId,
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size,
-            @Parameter(description = "节点类型，可选值：folder/doc", example = "folder") @RequestParam(required = false) String nodeType) {
+            @Parameter(description = "节点类型，可选值：folder/doc", example = "folder") @RequestParam(required = false) String nodeType,
+            @Parameter(description = "工作空间，不传则使用用户默认工作空间", example = "WPB") @RequestParam(required = false) String workspace) {
         org.springframework.web.context.request.ServletRequestAttributes attributes = 
             (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
         javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
         String userId = resolveUserIdFromHeader(req);
-        List<String> allowed = resolveAllowedWorkspaces(userId);
+        
+        // 检查当前用户是否为admin
+        boolean isAdmin = false;
+        if (userId != null) {
+            try {
+                User user = userService.findByUsername(userId);
+                if (user == null) {
+                    // 如果用户名查找失败，尝试作为用户ID解析
+                    try {
+                        Long uid = Long.valueOf(userId);
+                        user = userService.getById(uid);
+                    } catch (Exception ignore) {
+                        // 解析失败，保持user为null
+                    }
+                }
+                if (user != null && "Admin".equals(user.getSystemRole())) {
+                    isAdmin = true;
+                }
+            } catch (Exception e) {
+                log.warn("检查用户角色失败: userId={}, error={}", userId, e.getMessage());
+            }
+        }
+        
+        // 解析工作空间：admin用户不受工作空间限制
+        List<String> allowed = null;
+        if (!isAdmin) {
+            allowed = resolveWorkspaces(userId, workspace);
+        }
         
         // 添加调试日志
-        System.out.println("getChildren - parentId: " + parentId + ", userId: " + userId + ", allowed: " + allowed + ", nodeType: " + nodeType);
+        System.out.println("getChildren - parentId: " + parentId + ", userId: " + userId + ", isAdmin: " + isAdmin + ", allowed: " + allowed + ", nodeType: " + nodeType + ", workspace: " + workspace);
         
         // 如果nodeType为null，则不过滤节点类型，返回所有类型的子节点
         IPage<KnowledgeVO> result = knowledgeService.getChildrenFiltered(parentId == 0 ? null : parentId, page, size, allowed, nodeType);
@@ -227,8 +353,15 @@ public class KnowledgeController {
             @Parameter(description = "父知识ID(原类目ID)", required = true, example = "1") @PathVariable Long categoryId,
             @Parameter(description = "页码", example = "1") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页大小", example = "10") @RequestParam(defaultValue = "10") int size,
-            @Parameter(description = "节点类型，可选值：folder/doc", example = "folder") @RequestParam(required = false) String nodeType) {
-        IPage<KnowledgeVO> result = knowledgeService.getChildren(categoryId == 0 ? null : categoryId, page, size, nodeType);
+            @Parameter(description = "节点类型，可选值：folder/doc", example = "folder") @RequestParam(required = false) String nodeType,
+            @Parameter(description = "工作空间，不传则使用用户默认工作空间", example = "WPB") @RequestParam(required = false) String workspace) {
+        org.springframework.web.context.request.ServletRequestAttributes attributes = 
+            (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
+        String userId = resolveUserIdFromHeader(req);
+        List<String> allowed = resolveWorkspaces(userId, workspace);
+        
+        IPage<KnowledgeVO> result = knowledgeService.getChildrenFiltered(categoryId == 0 ? null : categoryId, page, size, allowed, nodeType);
         
         // 转换为简化版的KnowledgeListVO
         IPage<KnowledgeListVO> simplifiedResult = result.convert(KnowledgeListVO::fromKnowledgeVO);
@@ -238,24 +371,57 @@ public class KnowledgeController {
     @GetMapping("/popular")
     @Operation(summary = "获取热门知识", description = "获取热门知识列表")
     public ApiResponse<List<KnowledgeVO>> getPopularKnowledge(
-            @Parameter(description = "返回数量", example = "10") @RequestParam(defaultValue = "10") int limit) {
-        List<KnowledgeVO> result = knowledgeService.getPopularKnowledge(limit);
+            @Parameter(description = "返回数量", example = "10") @RequestParam(defaultValue = "10") int limit,
+            @Parameter(description = "工作空间，不传则使用用户默认工作空间", example = "WPB") @RequestParam(required = false) String workspace) {
+        org.springframework.web.context.request.ServletRequestAttributes attributes = 
+            (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
+        String userId = resolveUserIdFromHeader(req);
+        String workspaceString = resolveWorkspaceString(userId, workspace);
+        // 如果用户没有工作空间权限，传递空字符串而不是null
+        if (workspaceString == null) {
+            workspaceString = "";
+        }
+        
+        List<KnowledgeVO> result = knowledgeService.getPopularKnowledgeByWorkspaceString(limit, workspaceString);
         return ApiResponse.success("获取热门知识成功", result);
     }
     
     @GetMapping("/latest")
     @Operation(summary = "获取最新知识", description = "获取最新知识列表")
     public ApiResponse<List<KnowledgeVO>> getLatestKnowledge(
-            @Parameter(description = "返回数量", example = "10") @RequestParam(defaultValue = "10") int limit) {
-        List<KnowledgeVO> result = knowledgeService.getLatestKnowledge(limit);
+            @Parameter(description = "返回数量", example = "10") @RequestParam(defaultValue = "10") int limit,
+            @Parameter(description = "工作空间，不传则使用用户默认工作空间", example = "WPB") @RequestParam(required = false) String workspace) {
+        org.springframework.web.context.request.ServletRequestAttributes attributes = 
+            (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
+        String userId = resolveUserIdFromHeader(req);
+        String workspaceString = resolveWorkspaceString(userId, workspace);
+        // 如果用户没有工作空间权限，传递空字符串而不是null
+        if (workspaceString == null) {
+            workspaceString = "";
+        }
+        
+        List<KnowledgeVO> result = knowledgeService.getLatestKnowledgeByWorkspaceString(limit, workspaceString);
         return ApiResponse.success("获取最新知识成功", result);
     }
     
     @GetMapping("/hot-downloads")
     @Operation(summary = "获取最热资料", description = "根据下载数量倒序获取最热资料列表")
     public ApiResponse<List<KnowledgeVO>> getHotDownloads(
-            @Parameter(description = "返回数量", example = "10") @RequestParam(defaultValue = "10") int limit) {
-        List<KnowledgeVO> result = knowledgeService.getHotDownloads(limit);
+            @Parameter(description = "返回数量", example = "10") @RequestParam(defaultValue = "10") int limit,
+            @Parameter(description = "工作空间，不传则使用用户默认工作空间", example = "WPB") @RequestParam(required = false) String workspace) {
+        org.springframework.web.context.request.ServletRequestAttributes attributes = 
+            (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
+        String userId = resolveUserIdFromHeader(req);
+        String workspaceString = resolveWorkspaceString(userId, workspace);
+        // 如果用户没有工作空间权限，传递空字符串而不是null
+        if (workspaceString == null) {
+            workspaceString = "";
+        }
+        
+        List<KnowledgeVO> result = knowledgeService.getHotDownloadsByWorkspaceString(limit, workspaceString);
         return ApiResponse.success("获取最热资料成功", result);
     }
     

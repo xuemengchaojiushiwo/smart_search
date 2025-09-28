@@ -2,9 +2,7 @@ package com.knowledge.controller;
 
 import com.knowledge.dto.LoginRequest;
 import com.knowledge.entity.User;
-import com.knowledge.entity.UserDeptRole;
 import com.knowledge.service.UserService;
-import com.knowledge.service.UserDeptRoleService;
 import com.knowledge.util.JwtTokenProvider;
 import com.knowledge.vo.ApiResponse;
 import com.knowledge.vo.LoginResponse;
@@ -30,8 +28,6 @@ public class AuthController {
     @Autowired
     private UserService userService;
 
-    @Autowired
-    private UserDeptRoleService userDeptRoleService;
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
@@ -49,13 +45,13 @@ public class AuthController {
         String roleForToken = user.getSystemRole() != null ? user.getSystemRole() : user.getRole();
         String token = jwtTokenProvider.generateToken(user.getUsername(), roleForToken);
 
-        // 获取用户部门角色信息
-        List<UserDeptRole> userDeptRoles = userDeptRoleService.listByUser(user.getId());
-        List<LoginResponse.DeptRoleVO> departments = userDeptRoles.stream()
-                .map(deptRole -> {
+        // 获取用户工作空间信息
+        List<String> workspaces = userService.getAllowedWorkspaces(user.getId());
+        List<LoginResponse.DeptRoleVO> departments = workspaces.stream()
+                .map(workspace -> {
                     LoginResponse.DeptRoleVO deptRoleVO = new LoginResponse.DeptRoleVO();
-                    deptRoleVO.setDept(deptRole.getDept());
-                    deptRoleVO.setRole(deptRole.getRole());
+                    deptRoleVO.setDept(workspace); // 使用workspace作为dept显示
+                    deptRoleVO.setRole("Member"); // 默认角色
                     return deptRoleVO;
                 })
                 .collect(Collectors.toList());

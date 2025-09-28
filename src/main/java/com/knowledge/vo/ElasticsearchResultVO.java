@@ -26,6 +26,8 @@ public class ElasticsearchResultVO {
 
     private List<String> attachmentNames;
 
+    private String effectiveTime;
+
     // 高亮字段
     private String highlightTitle;
 

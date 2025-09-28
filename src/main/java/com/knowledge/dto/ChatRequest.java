@@ -23,4 +23,8 @@ public class ChatRequest {
     // 指定特定文件名进行RAG检索（可选）
     @Schema(description = "指定特定文件名进行RAG检索，如'安联美元基金.pdf'", example = "员工手册V2.1.pdf")
     private String sourceFile;
+    
+    // 指定工作空间进行RAG检索（可选）
+    @Schema(description = "指定工作空间进行RAG检索，如'WPB'", example = "WPB")
+    private String workspace;
 }

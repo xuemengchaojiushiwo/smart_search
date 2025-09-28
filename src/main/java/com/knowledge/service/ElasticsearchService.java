@@ -16,6 +16,7 @@ import org.elasticsearch.index.query.MultiMatchQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.elasticsearch.search.collapse.CollapseBuilder;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,57 +53,31 @@ public class ElasticsearchService {
         try {
             Map<String, Object> document = new HashMap<>();
 
-            // 基本信息
-            document.put("id", knowledge.getId());
-            document.put("title", knowledge.getName());
-            document.put("content", knowledge.getDescription());
-            document.put("parent_id", knowledge.getParentId());
-            document.put("node_type", knowledge.getNodeType());
+            // 基本信息 - 只设置ES mapping中存在的字段
+            document.put("knowledge_id", knowledge.getId());
+            document.put("knowledge_name", knowledge.getName());
+            document.put("description", knowledge.getDescription());
             document.put("tags", knowledge.getTags());
-            if (knowledge.getTableData() != null) {
-                document.put("table_data", knowledge.getTableData());
+            
+            // 设置有效时间（使用effective_time字段）
+            if (knowledge.getEffectiveStartTime() != null) {
+                document.put("effective_time", knowledge.getEffectiveStartTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
             }
-            document.put("author", knowledge.getCreatedBy());
-            document.put("status", knowledge.getStatus());
-            document.put("search_count", knowledge.getSearchCount());
-            document.put("download_count", knowledge.getDownloadCount());
+            
+            // 附件信息
+            if (attachments != null && !attachments.isEmpty()) {
+                for (Attachment attachment : attachments) {
+                    document.put("attachment_name", attachment.getFileName());
+                    document.put("file_type", attachment.getFileType());
+                    break; // 只设置第一个附件的信息
+                }
+            }
+            
+            // 工作空间信息
             if (workspaces != null && !workspaces.isEmpty()) {
                 document.put("workspaces", workspaces);
             }
-
-            // 时间字段
-            if (knowledge.getEffectiveStartTime() != null) {
-                document.put("effective_start_time", knowledge.getEffectiveStartTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-            }
-            if (knowledge.getEffectiveEndTime() != null) {
-                document.put("effective_end_time", knowledge.getEffectiveEndTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-            }
-            if (knowledge.getCreatedTime() != null) {
-                document.put("created_time", knowledge.getCreatedTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-            }
-            if (knowledge.getUpdatedTime() != null) {
-                document.put("updated_time", knowledge.getUpdatedTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-            }
-
-            // 附件信息
-            if (attachments != null && !attachments.isEmpty()) {
-                List<String> attachmentNames = new ArrayList<>();
-                List<String> attachmentTypes = new ArrayList<>();
-                long totalSize = 0;
-
-                for (Attachment attachment : attachments) {
-                    attachmentNames.add(attachment.getFileName());
-                    attachmentTypes.add(attachment.getFileType());
-                    totalSize += attachment.getFileSize() != null ? attachment.getFileSize() : 0;
-                }
-
-                document.put("attachment_names", attachmentNames);
-                document.put("attachment_types", attachmentTypes);
-                document.put("total_attachment_size", totalSize);
-                document.put("attachment_count", attachments.size());
-            }
             
-            // 额外：工作空间信息留空（由调用方补充或后续扩展）
             IndexRequest indexRequest = new IndexRequest(INDEX_NAME)
                     .id(knowledge.getId().toString())
                     .source(document, XContentType.JSON);
@@ -112,7 +88,7 @@ public class ElasticsearchService {
             return true;
 
         } catch (Exception e) {
-            log.error("知识索引失败: ID={}", knowledge.getId(), e);
+            log.error("知识索引失败: ID={}, 错误信息: {}", knowledge.getId(), e.getMessage(), e);
             return false;
         }
     }
@@ -128,50 +104,29 @@ public class ElasticsearchService {
         try {
             Map<String, Object> document = new HashMap<>();
 
-            // 基本信息
-            document.put("title", knowledge.getName());
-            document.put("content", knowledge.getDescription());
-            document.put("parent_id", knowledge.getParentId());
-            document.put("node_type", knowledge.getNodeType());
+            // 基本信息 - 只设置ES mapping中存在的字段
+            document.put("knowledge_id", knowledge.getId());
+            document.put("knowledge_name", knowledge.getName());
+            document.put("description", knowledge.getDescription());
             document.put("tags", knowledge.getTags());
-            document.put("author", knowledge.getCreatedBy());
-            document.put("status", knowledge.getStatus());
-            document.put("search_count", knowledge.getSearchCount());
-            document.put("download_count", knowledge.getDownloadCount());
-            if (knowledge.getTableData() != null) {
-                document.put("table_data", knowledge.getTableData());
-            }
-            if (workspaces != null && !workspaces.isEmpty()) {
-                document.put("workspaces", workspaces);
-            }
-
-            // 时间字段
+            
+            // 设置有效时间（使用effective_time字段）
             if (knowledge.getEffectiveStartTime() != null) {
-                document.put("effective_start_time", knowledge.getEffectiveStartTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+                document.put("effective_time", knowledge.getEffectiveStartTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
             }
-            if (knowledge.getEffectiveEndTime() != null) {
-                document.put("effective_end_time", knowledge.getEffectiveEndTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-            }
-            if (knowledge.getUpdatedTime() != null) {
-                document.put("updated_time", knowledge.getUpdatedTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-            }
-
+            
             // 附件信息
             if (attachments != null && !attachments.isEmpty()) {
-                List<String> attachmentNames = new ArrayList<>();
-                List<String> attachmentTypes = new ArrayList<>();
-                long totalSize = 0;
-
                 for (Attachment attachment : attachments) {
-                    attachmentNames.add(attachment.getFileName());
-                    attachmentTypes.add(attachment.getFileType());
-                    totalSize += attachment.getFileSize() != null ? attachment.getFileSize() : 0;
+                    document.put("attachment_name", attachment.getFileName());
+                    document.put("file_type", attachment.getFileType());
+                    break; // 只设置第一个附件的信息
                 }
-
-                document.put("attachment_names", attachmentNames);
-                document.put("attachment_types", attachmentTypes);
-                document.put("total_attachment_size", totalSize);
-                document.put("attachment_count", attachments.size());
+            }
+            
+            // 工作空间信息
+            if (workspaces != null && !workspaces.isEmpty()) {
+                document.put("workspaces", workspaces);
             }
 
             // 创建更新请求
@@ -184,7 +139,7 @@ public class ElasticsearchService {
             return true;
 
         } catch (Exception e) {
-            log.error("知识更新失败: ID={}", knowledge.getId(), e);
+            log.error("知识更新失败: ID={}, 错误信息: {}", knowledge.getId(), e.getMessage(), e);
             return false;
         }
     }
@@ -252,25 +207,32 @@ public class ElasticsearchService {
 
             // 多字段匹配查询（仅针对知识元数据文档，不包含chunk内容文档）
             MultiMatchQueryBuilder multiMatchQuery = QueryBuilders.multiMatchQuery(query)
-                    .field("title", 3.0f)            // 知识名称
-                    .field("content", 1.5f)          // 知识描述
+                    .field("knowledge_name", 3.0f)   // 知识名称
+                    .field("description", 1.5f)      // 知识描述
                     .field("tags", 2.0f)             // 标签
-                    .field("attachment_names", 1.8f) // 附件文件名
-                    .field("author", 1.0f)           // 作者
+                    .field("attachment_name", 1.8f)  // 附件文件名
                     .type(MultiMatchQueryBuilder.Type.BEST_FIELDS);
 
-            // 过滤条件：搜索知识元数据文档，排除chunk文档
+            // 过滤条件：搜索知识内容块文档
             org.elasticsearch.index.query.BoolQueryBuilder boolQuery = QueryBuilders.boolQuery()
                     .must(multiMatchQuery)
-                    .filter(QueryBuilders.existsQuery("id"))  // 必须有id字段（知识元数据）
-                    .filter(QueryBuilders.existsQuery("title")); // 必须有title字段（知识元数据）
+                    .filter(QueryBuilders.existsQuery("knowledge_id"))  // 必须有knowledge_id字段
+                    .filter(QueryBuilders.existsQuery("chunk_type")); // 必须有chunk_type字段（内容块）
             
-            if (allowedWorkspaces != null && !allowedWorkspaces.isEmpty()) {
-                boolQuery.filter(QueryBuilders.termsQuery("workspaces.keyword", allowedWorkspaces));
-                log.info("添加工作空间过滤: {}", allowedWorkspaces);
+            if (allowedWorkspaces != null) {
+                if (allowedWorkspaces.isEmpty()) {
+                    // 用户没有工作空间权限，返回空结果
+                    log.info("用户没有工作空间权限，返回空结果");
+                    return Collections.emptyList();
+                } else {
+                    boolQuery.filter(QueryBuilders.termsQuery("workspaces.keyword", allowedWorkspaces));
+                    log.info("添加工作空间过滤: {}", allowedWorkspaces);
+                }
             }
 
+            // 使用collapse按knowledge_id去重
             searchSourceBuilder.query(boolQuery);
+            searchSourceBuilder.collapse(new CollapseBuilder("knowledge_id"));
 
             // 分页（加下界保护，防止 from 为负或 size 非法）
             int safePage = page > 0 ? page : 1;
@@ -287,23 +249,28 @@ public class ElasticsearchService {
             SearchResponse response = elasticsearchClient.search(searchRequest, RequestOptions.DEFAULT);
             log.info("ES搜索响应，总命中数: {}", response.getHits().getTotalHits().value);
 
-            // 解析结果
+            // 解析结果（ES已经按knowledge_id去重）
             List<ElasticsearchResultVO> results = new ArrayList<>();
             for (SearchHit hit : response.getHits().getHits()) {
                 Map<String, Object> source = hit.getSourceAsMap();
-                ElasticsearchResultVO result = new ElasticsearchResultVO();
-                // 设置ID：仅在可解析为Long时设置，避免非数字ID引发异常
-                Object idObj = source.get("id");
-                String idStr = idObj != null ? idObj.toString() : hit.getId();
+                
+                // 获取knowledge_id
+                Object idObj = source.get("knowledge_id");
+                if (idObj == null) continue;
+                
+                Long knowledgeId;
                 try {
-                    if (idStr != null) {
-                        result.setId(Long.valueOf(idStr));
-                    }
+                    knowledgeId = Long.valueOf(idObj.toString());
                 } catch (NumberFormatException nfe) {
-                    log.warn("ES文档ID非数字，跳过ID设置: {}", idStr);
+                    log.warn("ES文档knowledge_id非数字，跳过: {}", idObj);
+                    continue;
                 }
-                result.setTitle((String) source.getOrDefault("title", ""));
-                result.setContent((String) source.getOrDefault("content", ""));
+                
+                ElasticsearchResultVO result = new ElasticsearchResultVO();
+                result.setId(knowledgeId);
+                result.setTitle((String) source.getOrDefault("knowledge_name", ""));
+                result.setContent((String) source.getOrDefault("description", ""));
+                
                 // 回填父子结构
                 Object parentIdObj = source.get("parent_id");
                 if (parentIdObj != null) {
@@ -329,20 +296,13 @@ public class ElasticsearchService {
                     @SuppressWarnings("unchecked")
                     List<String> attachmentNames = (List<String>) source.get("attachment_names");
                     result.setAttachmentNames(attachmentNames);
+                } else if (source.get("source_file") != null) {
+                    result.setAttachmentNames(java.util.Arrays.asList((String) source.get("source_file")));
                 }
 
-                // 设置高亮内容
-                if (hit.getHighlightFields().containsKey("title")) {
-                    result.setHighlightTitle(hit.getHighlightFields().get("title").fragments()[0].string());
-                }
-                if (hit.getHighlightFields().containsKey("content")) {
-                    result.setHighlightContent(hit.getHighlightFields().get("content").fragments()[0].string());
-                }
-                if (hit.getHighlightFields().containsKey("tags")) {
-                    result.setHighlightTags(hit.getHighlightFields().get("tags").fragments()[0].string());
-                }
-                if (hit.getHighlightFields().containsKey("attachment_names")) {
-                    result.setHighlightAttachmentNames(hit.getHighlightFields().get("attachment_names").fragments()[0].string());
+                // 设置有效时间
+                if (source.get("effective_time") != null) {
+                    result.setEffectiveTime((String) source.get("effective_time"));
                 }
 
                 results.add(result);
@@ -382,8 +342,13 @@ public class ElasticsearchService {
             org.elasticsearch.index.query.BoolQueryBuilder boolQuery = QueryBuilders.boolQuery()
                     .must(multiMatchQuery)
                     .filter(QueryBuilders.existsQuery("id"));
-            if (allowedWorkspaces != null && !allowedWorkspaces.isEmpty()) {
-                boolQuery.filter(QueryBuilders.termsQuery("workspaces.keyword", allowedWorkspaces));
+            if (allowedWorkspaces != null) {
+                if (allowedWorkspaces.isEmpty()) {
+                    // 用户没有工作空间权限，返回0
+                    return 0;
+                } else {
+                    boolQuery.filter(QueryBuilders.termsQuery("workspaces.keyword", allowedWorkspaces));
+                }
             }
 
             searchSourceBuilder.query(boolQuery);

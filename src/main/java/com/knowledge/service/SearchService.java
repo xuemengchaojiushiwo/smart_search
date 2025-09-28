@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +27,9 @@ public class SearchService {
     
     @Autowired
     private ElasticsearchService elasticsearchService;
+    
+    @Autowired
+    private UserService userService;
 
     @Autowired
     private PythonService pythonService;
@@ -39,14 +43,14 @@ public class SearchService {
     @Autowired
     private ChatPersistenceService chatPersistenceService;
 
-    @Autowired
-    private UserDeptRoleService userDeptRoleService;
-
-    @Autowired
-    private UserService userService;
 
     // 搜索知识
     public SearchResultVO searchKnowledge(SearchRequest request, Long userId) {
+        return searchKnowledge(request, userId, null);
+    }
+    
+    // 搜索知识（带工作空间参数）
+    public SearchResultVO searchKnowledge(SearchRequest request, Long userId, String workspace) {
         // 记录搜索历史 - 使用staffid作为userId
         SearchHistory history = new SearchHistory();
         // 获取用户的staffid
@@ -66,8 +70,19 @@ public class SearchService {
         history.setSearchTime(LocalDateTime.now());
         searchHistoryService.save(history);
 
-        // 解析用户可访问的 workspace 列表
-        List<String> allowedWorkspaces = resolveAllowedWorkspaces(userId);
+        // 解析工作空间
+        List<String> allowedWorkspaces = resolveWorkspaces(userId, workspace);
+        log.info("用户 {} 的工作空间权限: {}", userId, allowedWorkspaces);
+
+        // 如果用户没有工作空间权限，直接返回空结果
+        if (allowedWorkspaces == null || allowedWorkspaces.isEmpty()) {
+            log.info("用户没有工作空间权限，返回空搜索结果");
+            SearchResultVO result = new SearchResultVO();
+            result.setTotal(0L);
+            result.setEsResults(new ArrayList<>());
+            result.setRagResults(new ArrayList<>());
+            return result;
+        }
 
         // ES搜索（仅知识元数据，不含段落内容），按 workspace 过滤
         IPage<com.knowledge.vo.KnowledgeVO> esResults = knowledgeService.searchKnowledge(
@@ -82,6 +97,8 @@ public class SearchService {
         List<RagResultVO> ragResults = new ArrayList<>();
 
         String q = request.getQuery() != null ? request.getQuery().trim() : "";
+        
+        // 用户有工作空间权限，进行RAG检索
         boolean looksLikeQuestion = false;
         if (!q.isEmpty()) {
             String lower = q.toLowerCase();
@@ -102,7 +119,9 @@ public class SearchService {
         }
 
         try {
-            Map<String, Object> ragResponse = pythonService.chatWithRag(q, String.valueOf(userId), null);
+            // 传递工作空间信息给RAG检索
+            String workspaceForRag = String.join(",", allowedWorkspaces);
+            Map<String, Object> ragResponse = pythonService.chatWithRag(q, String.valueOf(userId), null, workspaceForRag);
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> references = (List<Map<String, Object>>) ragResponse.get("references");
             RagResultVO ragVo = new RagResultVO();
@@ -143,10 +162,18 @@ public class SearchService {
                     Object bbox = ref.get("bbox_union");
                     if (bbox instanceof List) {
                         @SuppressWarnings("unchecked")
-                        List<Number> nums = (List<Number>) bbox;
-                        List<Double> doubles = new ArrayList<>();
-                        for (Number n : nums) { doubles.add(n.doubleValue()); }
-                        kr.setBboxUnion(doubles);
+                        List<Object> bboxList = (List<Object>) bbox;
+                        List<List<Double>> bboxUnion = new ArrayList<>();
+                        for (Object item : bboxList) {
+                            if (item instanceof List) {
+                                @SuppressWarnings("unchecked")
+                                List<Number> nums = (List<Number>) item;
+                                List<Double> doubles = new ArrayList<>();
+                                for (Number n : nums) { doubles.add(n.doubleValue()); }
+                                bboxUnion.add(doubles);
+                            }
+                        }
+                        kr.setBboxUnion(bboxUnion);
                     }
                     if (ref.get("char_start") != null) {
                         try { kr.setCharStart(Integer.valueOf(String.valueOf(ref.get("char_start")))); } catch (Exception ignore) {}
@@ -166,13 +193,28 @@ public class SearchService {
                     } catch (Exception ignore) {}
                     mapped.add(kr);
                 }
-                // 仅返回一个引用
+                // 合并同一文件的引用，返回合并后的引用
                 // 如果没有命中引用并且不像问句，则回退为仅推荐问题
                 if (mapped.isEmpty() && !looksLikeQuestion) {
                     ragVo.setAnswer("");
                     ragVo.setReferences(java.util.Collections.emptyList());
                 } else {
-                    ragVo.setReferences(mapped.isEmpty() ? java.util.Collections.emptyList() : java.util.Collections.singletonList(mapped.get(0)));
+                    // 合并同一文件的引用
+                    Map<String, com.knowledge.vo.ChatResponse.KnowledgeReference> mergedRefs = new HashMap<>();
+                    for (com.knowledge.vo.ChatResponse.KnowledgeReference ref : mapped) {
+                        String key = ref.getKnowledgeId() + "-" + ref.getSourceFile();
+                        if (mergedRefs.containsKey(key)) {
+                            // 合并bbox信息
+                            com.knowledge.vo.ChatResponse.KnowledgeReference existing = mergedRefs.get(key);
+                            List<List<Double>> existingBboxes = existing.getBboxUnion() != null ? existing.getBboxUnion() : new ArrayList<>();
+                            List<List<Double>> newBboxes = ref.getBboxUnion() != null ? ref.getBboxUnion() : new ArrayList<>();
+                            existingBboxes.addAll(newBboxes);
+                            existing.setBboxUnion(existingBboxes);
+                        } else {
+                            mergedRefs.put(key, ref);
+                        }
+                    }
+                    ragVo.setReferences(new ArrayList<>(mergedRefs.values()));
                 }
             } else {
                 ragVo.setReferences(java.util.Collections.emptyList());
@@ -237,29 +279,53 @@ public class SearchService {
         return result;
     }
 
-    private List<String> resolveAllowedWorkspaces(Long userId) {
-        try {
-            if (userId == null) return null;
-            List<com.knowledge.entity.UserDeptRole> records = userDeptRoleService.listByUser(userId);
-            if (records != null && !records.isEmpty()) {
-                List<String> depts = new java.util.ArrayList<>();
-                for (com.knowledge.entity.UserDeptRole r : records) {
-                    if (r.getDept() != null && !r.getDept().trim().isEmpty()) {
-                        depts.add(r.getDept().trim());
-                    }
-                }
-                return depts.isEmpty() ? null : depts;
-            }
-            com.knowledge.entity.User u = userService.getById(userId);
-            if (u != null && u.getWorkspace() != null && !u.getWorkspace().trim().isEmpty()) {
-                String[] parts = u.getWorkspace().split(",");
-                List<String> list = new java.util.ArrayList<>();
-                for (String p : parts) { if (!p.trim().isEmpty()) list.add(p.trim()); }
-                return list.isEmpty() ? null : list;
-            }
-        } catch (Exception ignore) {}
-        return null; // null 表示不加过滤
+    // ES快速搜索（不包含RAG）
+    public SearchResultVO esSearchKnowledge(SearchRequest request, Long userId) {
+        return esSearchKnowledge(request, userId, null);
     }
+    
+    public SearchResultVO esSearchKnowledge(SearchRequest request, Long userId, String workspace) {
+        // 记录搜索历史
+        SearchHistory history = new SearchHistory();
+        com.knowledge.entity.User user = userService.getById(userId);
+        if (user != null && user.getStaffId() != null) {
+            try {
+                history.setUserId(Long.valueOf(user.getStaffId()));
+            } catch (NumberFormatException e) {
+                history.setUserId(userId);
+            }
+        } else {
+            history.setUserId(userId);
+        }
+        history.setQuery(request.getQuery());
+        history.setSearchTime(LocalDateTime.now());
+        searchHistoryService.save(history);
+
+        // 解析工作空间
+        List<String> allowedWorkspaces = resolveWorkspaces(userId, workspace);
+
+        // ES搜索（仅知识元数据，不含段落内容），按 workspace 过滤
+        IPage<com.knowledge.vo.KnowledgeVO> esResults = knowledgeService.searchKnowledge(
+            request.getQuery(), request.getPage(), request.getSize(), allowedWorkspaces);
+
+        // 增加搜索次数
+        esResults.getRecords().forEach(knowledge -> {
+            knowledgeService.incrementSearchCount(knowledge.getId());
+        });
+
+        // 构建搜索结果（只包含ES结果，不包含RAG）
+        SearchResultVO result = new SearchResultVO();
+        result.setTotal(esResults.getTotal());
+        result.setEsResults(esResults.getRecords());
+        result.setRagResults(new ArrayList<>()); // 空RAG结果
+
+        // 更新搜索历史的结果数量
+        history.setResultCount((int) esResults.getTotal());
+        searchHistoryService.updateById(history);
+
+        return result;
+    }
+
 
     // 获取搜索建议
     public List<String> getSearchSuggestions(String query) {
@@ -300,5 +366,23 @@ public class SearchService {
     // 获取热门搜索
     public List<String> getHotSearches(int limit) {
         return searchHistoryService.getHotSearches(limit);
+    }
+    
+    /**
+     * 解析工作空间列表
+     * @param userId 用户ID
+     * @param workspace 前端传入的工作空间参数，如果为null则使用用户默认工作空间
+     * @return 工作空间列表
+     */
+    private List<String> resolveWorkspaces(Long userId, String workspace) {
+        // 如果前端指定了工作空间，直接使用
+        if (workspace != null && !workspace.trim().isEmpty()) {
+            List<String> list = new ArrayList<>();
+            list.add(workspace.trim());
+            return list;
+        }
+        
+        // 否则使用用户默认工作空间
+        return userService.getAllowedWorkspaces(userId);
     }
 }

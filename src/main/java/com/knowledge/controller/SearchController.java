@@ -25,9 +25,10 @@ public class SearchController {
     private SearchService searchService;
     
     @PostMapping
-    @Operation(summary = "搜索知识", description = "根据关键词搜索知识")
+    @Operation(summary = "AI智能搜索", description = "使用大模型进行智能问答搜索")
     public ApiResponse<SearchResultVO> search(
-            @Parameter(description = "搜索请求", required = true) @Valid @RequestBody SearchRequest request) {
+            @Parameter(description = "搜索请求", required = true) @Valid @RequestBody SearchRequest request,
+            @Parameter(description = "工作空间，不传则使用用户默认工作空间", example = "WPB") @RequestParam(required = false) String workspace) {
         // 获取当前登录用户ID
         Long userId = SecurityUtils.getCurrentUserId();
         if (userId == null) {
@@ -35,8 +36,25 @@ public class SearchController {
             userId = 1L;
         }
         
-        log.info("搜索知识: {}, userId: {}", request.getQuery(), userId);
-        SearchResultVO result = searchService.searchKnowledge(request, userId);
+        log.info("AI智能搜索: {}, userId: {}, workspace: {}", request.getQuery(), userId, workspace);
+        SearchResultVO result = searchService.searchKnowledge(request, userId, workspace);
+        return ApiResponse.success(result);
+    }
+    
+    @PostMapping("/es")
+    @Operation(summary = "ES快速搜索", description = "使用Elasticsearch进行快速知识检索")
+    public ApiResponse<SearchResultVO> esSearch(
+            @Parameter(description = "搜索请求", required = true) @Valid @RequestBody SearchRequest request,
+            @Parameter(description = "工作空间，不传则使用用户默认工作空间", example = "WPB") @RequestParam(required = false) String workspace) {
+        // 获取当前登录用户ID
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            log.warn("无法获取当前用户ID，使用默认值1");
+            userId = 1L;
+        }
+        
+        log.info("ES快速搜索: {}, userId: {}, workspace: {}", request.getQuery(), userId, workspace);
+        SearchResultVO result = searchService.esSearchKnowledge(request, userId, workspace);
         return ApiResponse.success(result);
     }
     

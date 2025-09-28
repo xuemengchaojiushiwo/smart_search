@@ -91,13 +91,13 @@ public class PythonService {
      * 调用Python RAG服务进行智能问答
      */
     public Map<String, Object> chatWithRag(String question, String userId) {
-        return chatWithRag(question, userId, null);
+        return chatWithRag(question, userId, null, null);
     }
     
     /**
-     * 调用Python RAG服务进行智能问答（支持指定文件）
+     * 调用Python RAG服务进行智能问答（支持指定文件和工作空间）
      */
-    public Map<String, Object> chatWithRag(String question, String userId, String sourceFile) {
+    public Map<String, Object> chatWithRag(String question, String userId, String sourceFile, String workspace) {
         try {
             String url = pythonServiceUrl + "/api/rag/chat";
             
@@ -107,6 +107,10 @@ public class PythonService {
             if (sourceFile != null && !sourceFile.trim().isEmpty()) {
                 requestBody.put("source_file", sourceFile.trim());
                 log.info("RAG对话指定文件: {}", sourceFile);
+            }
+            if (workspace != null && !workspace.trim().isEmpty()) {
+                requestBody.put("workspace", workspace.trim());
+                log.info("RAG对话指定工作空间: {}", workspace);
             }
             
             HttpHeaders headers = new HttpHeaders();
@@ -135,7 +139,7 @@ public class PythonService {
      * 调用Python服务处理文档
      */
     public Map<String, Object> processDocument(MultipartFile file, Long knowledgeId, String knowledgeName,
-                                              String description, String tags, String effectiveTime) {
+                                              String description, String tags, String effectiveTime, String workspaces) {
         try {
             String url = pythonServiceUrl + "/api/document/process";
 
@@ -159,6 +163,7 @@ public class PythonService {
             if (description != null) form.add("description", description);
             if (tags != null) form.add("tags", tags);
             if (effectiveTime != null) form.add("effective_time", effectiveTime);
+            if (workspaces != null) form.add("workspaces", workspaces);
 
             HttpEntity<org.springframework.util.LinkedMultiValueMap<String, Object>> request = new HttpEntity<>(form, headers);
 

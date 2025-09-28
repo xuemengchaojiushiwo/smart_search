@@ -52,6 +52,10 @@ public class KnowledgeService {
      */
     @Transactional
     public Knowledge createKnowledge(KnowledgeDTO dto, String currentUser) {
+        return createKnowledge(dto, currentUser, "ALL");
+    }
+    
+    public Knowledge createKnowledge(KnowledgeDTO dto, String currentUser, String workspace) {
         Knowledge knowledge = new Knowledge();
         BeanUtils.copyProperties(dto, knowledge);
         knowledge.setCreatedBy(currentUser);
@@ -61,14 +65,20 @@ public class KnowledgeService {
         knowledge.setDownloadCount(0);
         
         knowledgeMapper.insert(knowledge);
+        
         // 绑定工作空间（多对多）
-        knowledgeWorkspaceService.replaceBindings(knowledge.getId(), dto.getWorkspaces());
+        java.util.List<String> workspaces = dto.getWorkspaces();
+        if (workspaces == null || workspaces.isEmpty()) {
+            // 如果没有指定工作空间，使用传入的workspace参数
+            workspaces = java.util.Arrays.asList(workspace);
+        }
+        knowledgeWorkspaceService.replaceBindings(knowledge.getId(), workspaces);
         
         // 索引到ES（含workspace）
-        java.util.List<String> workspaces = knowledgeWorkspaceService.listWorkspaces(knowledge.getId());
-        elasticsearchService.indexKnowledge(knowledge, null, workspaces);
+        java.util.List<String> finalWorkspaces = knowledgeWorkspaceService.listWorkspaces(knowledge.getId());
+        elasticsearchService.indexKnowledge(knowledge, null, finalWorkspaces);
         
-        log.info("知识创建成功: ID={}, 名称={}", knowledge.getId(), knowledge.getName());
+        log.info("知识创建成功: ID={}, 名称={}, 工作空间={}", knowledge.getId(), knowledge.getName(), finalWorkspaces);
         return knowledge;
     }
     
@@ -84,9 +94,8 @@ public class KnowledgeService {
             throw new BusinessException("知识不存在");
         }
         
-        // 保存版本
-        // 记录版本（目前不使用返回值）
-        saveVersion(existingKnowledge, "UPDATE", dto.getChangeReason(), currentUser);
+        // 保存版本 - 暂时注释掉，避免版本冲突
+        // saveVersion(existingKnowledge, "UPDATE", dto.getChangeReason(), currentUser);
         
         // 更新知识
         BeanUtils.copyProperties(dto, existingKnowledge);
@@ -188,6 +197,24 @@ public class KnowledgeService {
         return knowledgePage.convert(this::convertToVO);
     }
     
+    public IPage<KnowledgeVO> getKnowledgeListFilteredByWorkspaceString(int page, int size, String workspaceString) {
+        if (workspaceString == null || workspaceString.trim().isEmpty()) {
+            return getKnowledgeList(page, size);
+        }
+        Page<Knowledge> pageParam = new Page<>(page, size);
+        java.util.Set<Long> ids = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaceString(workspaceString);
+        if (ids.isEmpty()) {
+            Page<KnowledgeVO> empty = new Page<>(page, size);
+            empty.setTotal(0);
+            empty.setRecords(java.util.Collections.emptyList());
+            return empty;
+        }
+        LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Knowledge::getDeleted, 0).in(Knowledge::getId, ids).orderByDesc(Knowledge::getUpdatedTime);
+        IPage<Knowledge> knowledgePage = knowledgeMapper.selectPage(pageParam, wrapper);
+        return knowledgePage.convert(this::convertToVO);
+    }
+    
     /**
      * 获取某个父知识下的直接子节点
      */
@@ -229,6 +256,46 @@ public class KnowledgeService {
         return getChildrenFiltered(parentId, page, size, allowedWorkspaces, null);
     }
     
+    public IPage<KnowledgeVO> getChildrenFilteredByWorkspaceString(Long parentId, int page, int size, String workspaceString, String nodeType) {
+        Page<Knowledge> pageParam = new Page<>(page, size);
+        LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Knowledge::getDeleted, 0);
+        
+        // 如果workspaceString为null，说明是admin用户，不过滤工作空间
+        if (workspaceString != null) {
+            if (workspaceString.trim().isEmpty()) {
+                // 用户没有工作空间权限，返回空结果
+                Page<KnowledgeVO> empty = new Page<>(page, size);
+                empty.setTotal(0);
+                empty.setRecords(java.util.Collections.emptyList());
+                return empty;
+            } else {
+                // 非admin用户，按工作空间过滤
+                java.util.Set<Long> ids = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaceString(workspaceString);
+                if (ids.isEmpty()) {
+                    Page<KnowledgeVO> empty = new Page<>(page, size);
+                    empty.setTotal(0);
+                    empty.setRecords(java.util.Collections.emptyList());
+                    return empty;
+                }
+                wrapper.in(Knowledge::getId, ids);
+            }
+        }
+        // admin用户（workspaceString为null）不过滤工作空间，查询所有数据
+        
+        if (parentId == null) {
+            wrapper.and(w -> w.isNull(Knowledge::getParentId).or().eq(Knowledge::getParentId, 0L));
+        } else {
+            wrapper.eq(Knowledge::getParentId, parentId);
+        }
+        if (nodeType != null && !nodeType.trim().isEmpty()) {
+            wrapper.eq(Knowledge::getNodeType, nodeType);
+        }
+        wrapper.orderByDesc(Knowledge::getUpdatedTime);
+        IPage<Knowledge> knowledgePage = knowledgeMapper.selectPage(pageParam, wrapper);
+        return knowledgePage.convert(this::convertToVO);
+    }
+    
     /**
      * 获取子节点，支持按节点类型过滤
      * @param parentId 父节点ID
@@ -239,20 +306,32 @@ public class KnowledgeService {
      * @return 分页结果
      */
     public IPage<KnowledgeVO> getChildrenFiltered(Long parentId, int page, int size, java.util.List<String> allowedWorkspaces, String nodeType) {
-        if (allowedWorkspaces == null || allowedWorkspaces.isEmpty()) {
-            // 调用带nodeType参数的getChildren方法
-            return getChildren(parentId, page, size, nodeType);
-        }
         Page<Knowledge> pageParam = new Page<>(page, size);
-        java.util.Set<Long> ids = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaces(allowedWorkspaces);
-        if (ids.isEmpty()) {
-            Page<KnowledgeVO> empty = new Page<>(page, size);
-            empty.setTotal(0);
-            empty.setRecords(java.util.Collections.emptyList());
-            return empty;
-        }
         LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Knowledge::getDeleted, 0).in(Knowledge::getId, ids);
+        wrapper.eq(Knowledge::getDeleted, 0);
+        
+        // 如果allowedWorkspaces为null，说明是admin用户，不过滤工作空间
+        if (allowedWorkspaces != null) {
+            if (allowedWorkspaces.isEmpty()) {
+                // 用户没有工作空间权限，返回空结果
+                Page<KnowledgeVO> empty = new Page<>(page, size);
+                empty.setTotal(0);
+                empty.setRecords(java.util.Collections.emptyList());
+                return empty;
+            } else {
+                // 非admin用户，按工作空间过滤
+                java.util.Set<Long> ids = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaces(allowedWorkspaces);
+                if (ids.isEmpty()) {
+                    Page<KnowledgeVO> empty = new Page<>(page, size);
+                    empty.setTotal(0);
+                    empty.setRecords(java.util.Collections.emptyList());
+                    return empty;
+                }
+                wrapper.in(Knowledge::getId, ids);
+            }
+        }
+        // admin用户（allowedWorkspaces为null）不过滤工作空间，查询所有数据
+        
         if (parentId == null) {
             wrapper.and(w -> w.isNull(Knowledge::getParentId).or().eq(Knowledge::getParentId, 0L));
         } else {
@@ -371,8 +450,49 @@ public class KnowledgeService {
      * 获取热门知识
      */
     public List<KnowledgeVO> getPopularKnowledge(int limit) {
+        return getPopularKnowledge(limit, null);
+    }
+    
+    /**
+     * 获取热门知识（带工作空间过滤）
+     */
+    public List<KnowledgeVO> getPopularKnowledge(int limit, List<String> allowedWorkspaces) {
         LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Knowledge::getDeleted, 0);
+        
+        // 添加工作空间过滤
+        if (allowedWorkspaces == null || allowedWorkspaces.isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有工作空间权限，返回空结果
+        }
+        
+        java.util.Set<Long> allowedKnowledgeIds = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaces(allowedWorkspaces);
+        if (allowedKnowledgeIds.isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有权限访问任何知识
+        }
+        wrapper.in(Knowledge::getId, allowedKnowledgeIds);
+        
+        wrapper.orderByDesc(Knowledge::getSearchCount);
+        wrapper.last("LIMIT " + limit);
+        
+        List<Knowledge> knowledges = knowledgeMapper.selectList(wrapper);
+        return knowledges.stream().map(this::convertToVO).collect(Collectors.toList());
+    }
+    
+    public List<KnowledgeVO> getPopularKnowledgeByWorkspaceString(int limit, String workspaceString) {
+        LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Knowledge::getDeleted, 0);
+        
+        // 添加工作空间过滤
+        if (workspaceString == null || workspaceString.trim().isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有工作空间权限，返回空结果
+        }
+        
+        java.util.Set<Long> allowedKnowledgeIds = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaceString(workspaceString);
+        if (allowedKnowledgeIds.isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有权限访问任何知识
+        }
+        wrapper.in(Knowledge::getId, allowedKnowledgeIds);
+        
         wrapper.orderByDesc(Knowledge::getSearchCount);
         wrapper.last("LIMIT " + limit);
         
@@ -384,8 +504,49 @@ public class KnowledgeService {
      * 获取最新知识
      */
     public List<KnowledgeVO> getLatestKnowledge(int limit) {
+        return getLatestKnowledge(limit, null);
+    }
+    
+    /**
+     * 获取最新知识（带工作空间过滤）
+     */
+    public List<KnowledgeVO> getLatestKnowledge(int limit, List<String> allowedWorkspaces) {
         LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Knowledge::getDeleted, 0);
+        
+        // 添加工作空间过滤
+        if (allowedWorkspaces == null || allowedWorkspaces.isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有工作空间权限，返回空结果
+        }
+        
+        java.util.Set<Long> allowedKnowledgeIds = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaces(allowedWorkspaces);
+        if (allowedKnowledgeIds.isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有权限访问任何知识
+        }
+        wrapper.in(Knowledge::getId, allowedKnowledgeIds);
+        
+        wrapper.orderByDesc(Knowledge::getUpdatedTime);
+        wrapper.last("LIMIT " + limit);
+        
+        List<Knowledge> knowledges = knowledgeMapper.selectList(wrapper);
+        return knowledges.stream().map(this::convertToVO).collect(Collectors.toList());
+    }
+    
+    public List<KnowledgeVO> getLatestKnowledgeByWorkspaceString(int limit, String workspaceString) {
+        LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Knowledge::getDeleted, 0);
+        
+        // 添加工作空间过滤
+        if (workspaceString == null || workspaceString.trim().isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有工作空间权限，返回空结果
+        }
+        
+        java.util.Set<Long> allowedKnowledgeIds = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaceString(workspaceString);
+        if (allowedKnowledgeIds.isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有权限访问任何知识
+        }
+        wrapper.in(Knowledge::getId, allowedKnowledgeIds);
+        
         wrapper.orderByDesc(Knowledge::getUpdatedTime);
         wrapper.last("LIMIT " + limit);
         
@@ -397,8 +558,50 @@ public class KnowledgeService {
      * 获取最热资料（根据下载数量倒序）
      */
     public List<KnowledgeVO> getHotDownloads(int limit) {
+        return getHotDownloads(limit, null);
+    }
+    
+    /**
+     * 获取最热资料（带工作空间过滤）
+     */
+    public List<KnowledgeVO> getHotDownloads(int limit, List<String> allowedWorkspaces) {
         LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Knowledge::getDeleted, 0);
+        
+        // 添加工作空间过滤
+        if (allowedWorkspaces == null || allowedWorkspaces.isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有工作空间权限，返回空结果
+        }
+        
+        java.util.Set<Long> allowedKnowledgeIds = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaces(allowedWorkspaces);
+        if (allowedKnowledgeIds.isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有权限访问任何知识
+        }
+        wrapper.in(Knowledge::getId, allowedKnowledgeIds);
+        
+        wrapper.orderByDesc(Knowledge::getDownloadCount);
+        wrapper.orderByDesc(Knowledge::getSearchCount); // 下载数相同时按搜索数排序
+        wrapper.last("LIMIT " + limit);
+        
+        List<Knowledge> knowledges = knowledgeMapper.selectList(wrapper);
+        return knowledges.stream().map(this::convertToVO).collect(Collectors.toList());
+    }
+    
+    public List<KnowledgeVO> getHotDownloadsByWorkspaceString(int limit, String workspaceString) {
+        LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Knowledge::getDeleted, 0);
+        
+        // 添加工作空间过滤
+        if (workspaceString == null || workspaceString.trim().isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有工作空间权限，返回空结果
+        }
+        
+        java.util.Set<Long> allowedKnowledgeIds = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaceString(workspaceString);
+        if (allowedKnowledgeIds.isEmpty()) {
+            return java.util.Collections.emptyList(); // 没有权限访问任何知识
+        }
+        wrapper.in(Knowledge::getId, allowedKnowledgeIds);
+        
         wrapper.orderByDesc(Knowledge::getDownloadCount);
         wrapper.orderByDesc(Knowledge::getSearchCount); // 下载数相同时按搜索数排序
         wrapper.last("LIMIT " + limit);
@@ -477,9 +680,11 @@ public class KnowledgeService {
     private KnowledgeVersion saveVersion(Knowledge knowledge, String changeType, String changeReason, String currentUser) {
         KnowledgeVersion version = new KnowledgeVersion();
         BeanUtils.copyProperties(knowledge, version);
+        // 清除ID，让数据库自动生成
+        version.setId(null);
         version.setKnowledgeId(knowledge.getId());
         version.setCreatedBy(currentUser);
-        version.setChangeReason(changeReason);
+        version.setChangeReason(changeReason != null ? changeReason : "系统更新");
         
         // 获取版本号
         LambdaQueryWrapper<KnowledgeVersion> wrapper = new LambdaQueryWrapper<>();
@@ -520,13 +725,18 @@ public class KnowledgeService {
                 effectiveTime = startTime + " - " + endTime;
             }
             
+            // 获取工作空间信息
+            java.util.List<String> workspaces = knowledgeWorkspaceService.listWorkspaces(knowledgeId);
+            String workspacesStr = workspaces != null && !workspaces.isEmpty() ? String.join(",", workspaces) : "ALL";
+            
             Map<String, Object> result = pythonService.processDocument(
                 file,
                 knowledgeId,
                 knowledge.getName(),
                 knowledge.getDescription(),
                 knowledge.getTags() == null ? null : String.join(",", knowledge.getTags()),
-                effectiveTime
+                effectiveTime,
+                workspacesStr
             );
 
             // 同步保存附件，确保列表和详情能看到关联文件
@@ -534,7 +744,6 @@ public class KnowledgeService {
 
             // 更新ES中的知识索引，包含最新附件信息与workspaces
             List<Attachment> attachments = attachmentService.getByKnowledgeId(knowledgeId);
-            java.util.List<String> workspaces = knowledgeWorkspaceService.listWorkspaces(knowledgeId);
             elasticsearchService.updateKnowledge(knowledge, attachments, workspaces);
             
             log.info("知识文档处理成功: knowledgeId={}, fileName={}", knowledgeId, file.getOriginalFilename());

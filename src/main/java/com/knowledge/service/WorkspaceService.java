@@ -30,6 +30,15 @@ public class WorkspaceService {
     public List<Workspace> listAll() {
         return mapper.selectList(new LambdaQueryWrapper<Workspace>().orderByAsc(Workspace::getCode));
     }
+    
+    public List<Workspace> listByCodes(List<String> codes) {
+        if (codes == null || codes.isEmpty()) {
+            return List.of();
+        }
+        return mapper.selectList(new LambdaQueryWrapper<Workspace>()
+                .in(Workspace::getCode, codes)
+                .orderByAsc(Workspace::getCode));
+    }
 }
 
 

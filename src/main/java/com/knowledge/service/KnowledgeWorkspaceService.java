@@ -33,14 +33,38 @@ public class KnowledgeWorkspaceService extends ServiceImpl<KnowledgeWorkspaceMap
 
     public java.util.Set<Long> listKnowledgeIdsByWorkspaces(List<String> workspaces) {
         if (workspaces == null || workspaces.isEmpty()) return java.util.Collections.emptySet();
-        List<KnowledgeWorkspace> records = list(new LambdaQueryWrapper<KnowledgeWorkspace>()
-                .in(KnowledgeWorkspace::getWorkspace, workspaces));
+        
+        // 构建查询条件：用户有权限的工作空间 OR ALL工作空间
+        LambdaQueryWrapper<KnowledgeWorkspace> wrapper = new LambdaQueryWrapper<>();
+        wrapper.and(w -> w.in(KnowledgeWorkspace::getWorkspace, workspaces)
+                .or()
+                .eq(KnowledgeWorkspace::getWorkspace, "ALL"));
+        
+        List<KnowledgeWorkspace> records = list(wrapper);
         if (records == null || records.isEmpty()) return java.util.Collections.emptySet();
         java.util.Set<Long> ids = new java.util.HashSet<>();
         for (KnowledgeWorkspace kw : records) {
             if (kw.getKnowledgeId() != null) ids.add(kw.getKnowledgeId());
         }
         return ids;
+    }
+    
+    /**
+     * 根据逗号分隔的工作空间字符串获取知识ID列表
+     */
+    public java.util.Set<Long> listKnowledgeIdsByWorkspaceString(String workspaceString) {
+        if (workspaceString == null || workspaceString.trim().isEmpty()) {
+            return java.util.Collections.emptySet();
+        }
+        
+        // 解析逗号分隔的工作空间
+        List<String> workspaces = java.util.Arrays.asList(workspaceString.split(","));
+        workspaces = workspaces.stream()
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toList());
+        
+        return listKnowledgeIdsByWorkspaces(workspaces);
     }
 }
 

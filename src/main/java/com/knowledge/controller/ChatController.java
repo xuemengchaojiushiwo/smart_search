@@ -339,7 +339,7 @@ public class ChatController {
             // 尝试调用Python RAG服务，如果失败则使用模拟响应
             Map<String, Object> result;
             try {
-                result = pythonService.chatWithRag(request.getQuestion(), username, request.getSourceFile());
+                result = pythonService.chatWithRag(request.getQuestion(), username, request.getSourceFile(), request.getWorkspace());
             } catch (Exception e) {
                 log.warn("Python服务不可用，使用模拟响应: {}", e.getMessage());
                 // 创建模拟响应

@@ -27,7 +27,7 @@ public class ChatResponse {
         private Integer pageNum;
         private Integer chunkIndex;
         private String chunkType;
-        private List<Double> bboxUnion;
+        private List<List<Double>> bboxUnion;
         private Integer charStart;
         private Integer charEnd;
     }
