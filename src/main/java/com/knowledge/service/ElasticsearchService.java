@@ -213,11 +213,11 @@ public class ElasticsearchService {
                     .field("attachment_name", 1.8f)  // 附件文件名
                     .type(MultiMatchQueryBuilder.Type.BEST_FIELDS);
 
-            // 过滤条件：搜索知识内容块文档
+            // 过滤条件：搜索知识元数据文档（不是content chunk）
             org.elasticsearch.index.query.BoolQueryBuilder boolQuery = QueryBuilders.boolQuery()
                     .must(multiMatchQuery)
                     .filter(QueryBuilders.existsQuery("knowledge_id"))  // 必须有knowledge_id字段
-                    .filter(QueryBuilders.existsQuery("chunk_type")); // 必须有chunk_type字段（内容块）
+                    .mustNot(QueryBuilders.existsQuery("chunk_type")); // 不能有chunk_type字段（排除content chunk）
             
             if (allowedWorkspaces != null) {
                 if (allowedWorkspaces.isEmpty()) {
