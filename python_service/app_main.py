@@ -19,6 +19,7 @@ from shutil import which
 import shutil
 import requests
 import json
+import re
 
 # PyMuPDF相关
 try:
@@ -65,6 +66,43 @@ except Exception:
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def clean_json_from_answer(answer: str) -> str:
+    """
+    清理AI回答中的JSON格式信息，只保留纯文本回答
+    """
+    if not answer:
+        return answer
+    
+    original_answer = answer
+    
+    # 移除所有JSON代码块
+    if "```json" in answer:
+        answer = answer.split("```json")[0].strip()
+    if "```" in answer:
+        answer = answer.split("```")[0].strip()
+    
+    # 移除所有包含used_mc_ids的JSON格式信息（包括空数组和非空数组）
+    if "{" in answer and "used_mc_ids" in answer:
+        # 匹配各种格式的used_mc_ids JSON
+        answer = re.sub(r'\{[^}]*"used_mc_ids"[^}]*\}', '', answer).strip()
+        # 匹配多行JSON格式
+        answer = re.sub(r'\{[^}]*"used_mc_ids"[^}]*\}', '', answer, flags=re.DOTALL).strip()
+    
+    # 清理各种提示语
+    answer = re.sub(r'以下是相关的JSON格式响应：', '', answer).strip()
+    answer = re.sub(r'以下是JSON格式的响应：', '', answer).strip()
+    answer = re.sub(r'JSON格式的响应：', '', answer).strip()
+    answer = re.sub(r'相关JSON格式响应：', '', answer).strip()
+    
+    # 清理可能残留的JSON片段
+    answer = re.sub(r'^\s*\{.*\}\s*$', '', answer).strip()
+    answer = re.sub(r'^\s*\[.*\]\s*$', '', answer).strip()
+    
+    if answer != original_answer:
+        logger.info(f"已清理JSON信息，原始长度: {len(original_answer)}, 清理后长度: {len(answer)}")
+    
+    return answer
 
 app = FastAPI(title="智能知识库系统", version="2.0.0")
 
@@ -307,6 +345,7 @@ class ChatRequest(BaseModel):
     question: str
     user_id: str
     source_file: Optional[str] = None  # 可选：指定特定文件名进行RAG检索
+    workspace: Optional[str] = None  # 可选：指定工作空间进行RAG检索
 
 class DocumentProcessRequest(BaseModel):
     knowledge_id: int
@@ -336,7 +375,7 @@ class KnowledgeReference(BaseModel):
     chunk_index: Optional[int] = None
     chunk_type: Optional[str] = None
     # 新增：返回块坐标与字符范围，便于前端高亮
-    bbox_union: Optional[List[float]] = None
+    bbox_union: Optional[List[List[float]]] = None
     char_start: Optional[int] = None
     char_end: Optional[int] = None
 
@@ -951,6 +990,7 @@ def process_document_unified(
     description: Optional[str] = None,
     tags: Optional[str] = None,
     effective_time: Optional[str] = None,
+    workspaces: Optional[str] = None,
 ) -> Dict:
     """
     统一处理文档：
@@ -1048,7 +1088,8 @@ def process_document_unified(
         logger.info(f"最终生成 {len(chunks)} 个chunks")
         
         # 存储到ES
-        stored_count = store_chunks_to_es(chunks, knowledge_id)
+        workspaces_list = workspaces.split(",") if workspaces else None
+        stored_count = store_chunks_to_es(chunks, knowledge_id, workspaces_list)
         
         return {
             "chunks_count": stored_count,
@@ -1394,7 +1435,7 @@ def find_best_position_match_block_level(chunk_text: str, position_mapping: List
     
     return best_match
 
-def store_chunks_to_es(chunks: List[Document], knowledge_id: int):
+def store_chunks_to_es(chunks: List[Document], knowledge_id: int, workspaces: Optional[List[str]] = None):
     """
     将chunks存储到Elasticsearch
     """
@@ -1453,6 +1494,10 @@ def store_chunks_to_es(chunks: List[Document], knowledge_id: int):
                 "weight": 1.0
             }
             
+            # 添加工作空间信息
+            if workspaces:
+                es_doc["workspaces"] = workspaces
+            
             # 确保所有字符串字段使用正确的UTF-8编码
             for key, value in es_doc.items():
                 if isinstance(value, str):
@@ -1480,7 +1525,8 @@ async def process_document(
     knowledge_name: str = Form(None),
     description: str = Form(None),
     tags: str = Form(None),
-    effective_time: str = Form(None)
+    effective_time: str = Form(None),
+    workspaces: str = Form(None)
 ):
     """
     处理上传的文档
@@ -1530,6 +1576,7 @@ async def process_document(
                     description=description,
                     tags=tags,
                     effective_time=effective_time,
+                    workspaces=workspaces,
                 )
                 
                 return DocumentProcessResponse(
@@ -1563,6 +1610,7 @@ def chat_with_rag(request: ChatRequest):
     基于知识库的智能问答
     """
     logger.info(f"RAG聊天请求: {request.question}")
+    logger.info(f"接收到的参数: source_file={request.source_file}, workspace={request.workspace}")
     
     try:
         # 1. 向量搜索找到相关chunks
@@ -1596,8 +1644,18 @@ def chat_with_rag(request: ChatRequest):
             {"term": {"chunk_type": "content"}}  # 只搜索内容类型的chunk
         ]
         
+        # 如果指定了工作空间，则按工作空间过滤
+        if request.workspace:
+            logger.info(f"按工作空间过滤RAG检索: {request.workspace}")
+            # 支持多个工作空间，用逗号分隔
+            workspaces = [w.strip() for w in request.workspace.split(",") if w.strip()]
+            if workspaces:
+                if len(workspaces) == 1:
+                    filters.append({"term": {"workspaces.keyword": workspaces[0]}})
+                else:
+                    filters.append({"terms": {"workspaces.keyword": workspaces}})
         # 如果指定了特定文件，则只检索该文件的chunks
-        if request.source_file:
+        elif request.source_file:
             logger.info(f"按文件名过滤RAG检索: {request.source_file}")
             filters.append({"term": {"source_file": request.source_file}})
         
@@ -1724,26 +1782,30 @@ def chat_with_rag(request: ChatRequest):
         # 4.1 解析模型返回的 used_mc_ids（在清理答案之前）
         used_mc_ids = parse_used_mc_ids(answer)
         
-        # 4.2 清理答案中的JSON格式信息，只保留纯文本回答
-        import re  # 确保在所有使用re的地方之前导入
+        # 4.2 检查AI是否明确表示无法从文档中找到相关信息
+        no_relevant_info_keywords = [
+            "文档中未提及", "未涉及", "未找到", "没有相关信息", "无法从文档中", 
+            "文档中没有", "未包含", "未提供", "无法找到", "没有找到",
+            "文档中未明确", "未在文中", "文中未", "文档未", "未在文档中"
+        ]
         
-        original_answer = answer
-        if "```json" in answer:
-            # 移除JSON代码块
-            answer = answer.split("```json")[0].strip()
-        if "```" in answer:
-            # 移除其他代码块标记
-            answer = answer.split("```")[0].strip()
-        if "{" in answer and "used_mc_ids" in answer:
-            # 移除JSON格式的used_mc_ids信息
-            answer = re.sub(r'\{[^}]*"used_mc_ids"[^}]*\}', '', answer).strip()
+        # 检查AI回答是否包含"无法找到相关信息"的表述
+        answer_lower = answer.lower()
+        has_no_relevant_info = any(keyword in answer_lower for keyword in no_relevant_info_keywords)
         
-        # 清理"以下是相关的JSON格式响应："等提示语
-        answer = re.sub(r'以下是相关的JSON格式响应：', '', answer).strip()
-        answer = re.sub(r'以下是JSON格式的响应：', '', answer).strip()
+        if has_no_relevant_info:
+            logger.info("AI明确表示无法从文档中找到相关信息，将返回空引用")
+            # 清理答案中的JSON信息
+            cleaned_answer = clean_json_from_answer(answer)
+            return ChatResponse(
+                answer=cleaned_answer,
+                references=[],  # 返回空引用
+                session_id=request.user_id
+            )
         
-        if answer != original_answer:
-            logger.info(f"已清理JSON信息，原始长度: {len(original_answer)}, 清理后长度: {len(answer)}")
+        # 4.3 清理答案中的JSON格式信息，只保留纯文本回答
+        answer = clean_json_from_answer(answer)
+        
         logger.info(f"模型返回 used_mc_ids 数量: {len(used_mc_ids)}")
         if used_mc_ids:
             logger.info(f"解析到的 mc_ids: {used_mc_ids[:5]}")  # 只显示前5个
@@ -1825,15 +1887,12 @@ def chat_with_rag(request: ChatRequest):
                 chunks_without_mini_chunks.append(chunk)
                 logger.info(f"Chunk {metadata.get('chunk_index')} 无mini-chunks")
         
-        # 优先使用有mini-chunks的chunk，最多只返回一个没有mini-chunks的chunk
-        if chunks_with_mini_chunks:
-            selected_chunks = chunks_with_mini_chunks
-        elif chunks_without_mini_chunks:
-            # 如果没有mini-chunks，只返回相似度最高的一个chunk
-            selected_chunks = [max(chunks_without_mini_chunks, key=lambda x: x.get('metadata', {}).get('relevance_score', 0))]
-        else:
+        # 只选择有mini-chunks的chunk，确保引用只包含AI实际使用的信息
+        selected_chunks = chunks_with_mini_chunks.copy()
+        
+        if not selected_chunks:
             selected_chunks = []
-        logger.info(f"选择了 {len(selected_chunks)} 个chunks（有mini-chunks: {len(chunks_with_mini_chunks)}, 无mini-chunks: {len(selected_chunks) - len(chunks_with_mini_chunks)}）")
+        logger.info(f"选择了 {len(selected_chunks)} 个chunks（有mini-chunks: {len(chunks_with_mini_chunks)}, 无mini-chunks: 0）")
 
         # 如果阈值过滤后没有任何chunk，或者所有选中的chunk都没有mini-chunks，通过LLM返回顺序取第一个有效的mini-chunk所属的大块作为兜底
         if not selected_chunks or all(len(chunk.get('metadata', {}).get('mini_chunks', [])) == 0 for chunk in selected_chunks):
@@ -1867,53 +1926,53 @@ def chat_with_rag(request: ChatRequest):
             # 重要：在第二次循环中重新获取本次chunk的metadata，避免沿用上一次循环的metadata
             metadata = chunk['metadata']
 
-            # 从模型返回的 used_mc_ids 中取本 chunk 的高亮，只取第一个（最相关的）
+            # 从模型返回的 used_mc_ids 中取本 chunk 的高亮，只取属于当前chunk的mini-chunk
             key = (metadata.get('knowledge_id', 0), metadata.get('chunk_index', 0))
-            # 确保使用大模型选择的mini-chunk，而不是按照chunk过滤
             hl_for_chunk = []
             for mcid in used_mc_ids:
                 entry = mcid_to_entry.get(mcid)
-                if entry and entry.get("knowledge_id") == metadata.get('knowledge_id'):
-                    # 直接使用大模型选择的mini-chunk，不检查页码
+                if entry and entry.get("knowledge_id") == metadata.get('knowledge_id') and entry.get("chunk_index") == metadata.get('chunk_index'):
+                    # 只使用属于当前chunk的mini-chunk
                     hl_for_chunk.append(entry)
                     logger.info(f"找到匹配的mini-chunk: {mcid}, 页码: {entry.get('page')}, 文本: {entry.get('text')[:30]}...")
                     break
 
-            # 如果有选中的小块，使用所有选中小块的合并坐标并扩大4倍；否则使用大块的坐标
+            # 如果有选中的小块，使用所有选中小块的坐标并扩大4倍；否则使用大块的坐标
             if hl_for_chunk:
-                # 合并所有选中小块的坐标
+                # 收集所有选中小块的坐标
                 all_bboxes = [mc.get("bbox", []) for mc in hl_for_chunk if mc.get("bbox") and len(mc.get("bbox", [])) == 4]
                 if all_bboxes:
-                    # 计算所有小块的合并边界框
-                    x0 = min(bbox[0] for bbox in all_bboxes)
-                    y0 = min(bbox[1] for bbox in all_bboxes)
-                    x1 = max(bbox[2] for bbox in all_bboxes)
-                    y1 = max(bbox[3] for bbox in all_bboxes)
+                    # 为每个小块单独扩大4倍，保留多个bbox
+                    expanded_bboxes = []
+                    for bbox in all_bboxes:
+                        x0, y0, x1, y1 = bbox
+                        
+                        # 计算中心点和尺寸
+                        center_x = (x0 + x1) / 2
+                        center_y = (y0 + y1) / 2
+                        width = x1 - x0
+                        height = y1 - y0
 
-                    # 计算中心点和尺寸
-                    center_x = (x0 + x1) / 2
-                    center_y = (y0 + y1) / 2
-                    width = x1 - x0
-                    height = y1 - y0
+                        # 扩大倍率调整到4倍，确保短文本也能有足够大的高亮区域
+                        new_width = width * 4
+                        new_height = height * 4
 
-                    # 扩大倍率调整到4倍，确保短文本也能有足够大的高亮区域
-                    new_width = width * 4
-                    new_height = height * 4
+                        # 计算新的边界框
+                        new_x0 = center_x - new_width / 2
+                        new_y0 = center_y - new_height / 2
+                        new_x1 = center_x + new_width / 2
+                        new_y1 = center_y + new_height / 2
 
-                    # 计算新的边界框
-                    new_x0 = center_x - new_width / 2
-                    new_y0 = center_y - new_height / 2
-                    new_x1 = center_x + new_width / 2
-                    new_y1 = center_y + new_height / 2
-
-                    bbox_to_use = [new_x0, new_y0, new_x1, new_y1]
-                    logger.info(f"为 chunk {metadata.get('chunk_index')} 使用选中小块合并坐标并扩大4倍: {[x0, y0, x1, y1]} -> {bbox_to_use}")
+                        expanded_bboxes.append([new_x0, new_y0, new_x1, new_y1])
+                    
+                    bbox_to_use = expanded_bboxes
+                    logger.info(f"为 chunk {metadata.get('chunk_index')} 使用选中小块坐标并扩大4倍: {all_bboxes} -> {bbox_to_use}")
                 else:
-                    bbox_to_use = metadata.get('bbox', [])
+                    bbox_to_use = [metadata.get('bbox', [])] if metadata.get('bbox') else []
                     logger.info(f"为 chunk {metadata.get('chunk_index')} 小块坐标为空或格式错误，使用大块坐标")
             else:
                 # 使用大块坐标
-                bbox_to_use = metadata.get('bbox', [])
+                bbox_to_use = [metadata.get('bbox', [])] if metadata.get('bbox') else []
                 logger.info(f"为 chunk {metadata.get('chunk_index')} 无小块，使用大块坐标")
             
             # 如果有选中的小块，使用小块的页码；否则使用chunk的页码
@@ -2038,10 +2097,12 @@ def build_enhanced_rag_prompt_with_mini_chunks(question: str, context_chunks: Li
 3. 如果问题没有指定具体文档，请基于所有相关信息给出综合回答
 4. 答案要具体、准确，包含关键数据
 5. 用中文回答，并说明信息来源（如"根据文档第X页"）
-6. 在回答末尾，请返回一个JSON格式的响应，包含你实际使用的小块ID（按相关性从高到低排序）：
+6. 如果提供的文档中完全没有与问题相关的信息，请明确说明"文档中未提及相关内容"或"未找到相关信息"
+7. 在回答末尾，请返回一个JSON格式的响应，包含你实际使用的小块ID（按相关性从高到低排序）：
    {{"used_mc_ids": ["30:page_num:chunk_index:mini_chunk_index", ...]}}
    
    注意：请将最相关的小块ID放在数组的前面，这样系统会优先使用最相关的小块进行高亮显示。
+   如果文档中没有相关信息，used_mc_ids应该为空数组[]。
 
 请开始回答：
 """
@@ -2093,6 +2154,7 @@ def build_enhanced_rag_prompt(question: str, context_chunks: List[Dict]) -> str:
 3. 如果问题没有指定具体文档，请基于所有相关信息给出综合回答
 4. 答案要具体、准确，包含关键数据
 5. 用中文回答，并说明信息来源（如"根据文档第X页"）
+6. 如果提供的文档中完全没有与问题相关的信息，请明确说明"文档中未提及相关内容"或"未找到相关信息"
 
 请开始回答：
 """
