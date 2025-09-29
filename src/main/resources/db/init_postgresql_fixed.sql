@@ -1,4 +1,3 @@
--- PostgreSQL 数据库初始化脚本（基于 init_fixed.sql）
 -- 创建数据库和用户（需要在 postgres 数据库中执行）
 
 -- 创建数据库
@@ -9,6 +8,26 @@ CREATE DATABASE knowledge_base;
 
 -- 创建扩展（如果需要）
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 确保目标 schema 存在，并将 search_path 设为 knowledge_base 优先
+CREATE SCHEMA IF NOT EXISTS knowledge_base;
+SET search_path TO knowledge_base, public;
+
+-- 直接按依赖顺序删除即可（幂等）
+DROP TABLE IF EXISTS knowledge_favorites CASCADE;
+DROP TABLE IF EXISTS knowledge_likes CASCADE;
+DROP TABLE IF EXISTS knowledge_feedbacks CASCADE;
+DROP TABLE IF EXISTS attachments CASCADE;
+DROP TABLE IF EXISTS knowledge_versions CASCADE;
+DROP TABLE IF EXISTS knowledge_workspace CASCADE;
+DROP TABLE IF EXISTS search_history CASCADE;
+DROP TABLE IF EXISTS chat_messages CASCADE;
+DROP TABLE IF EXISTS chat_feedbacks CASCADE;
+DROP TABLE IF EXISTS chat_sessions CASCADE;
+DROP TABLE IF EXISTS workspaces CASCADE;
+DROP TABLE IF EXISTS knowledge CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS user_dept_role CASCADE;
 
 -- 用户表
 CREATE TABLE users (
@@ -28,7 +47,7 @@ CREATE TABLE users (
     status INTEGER DEFAULT 1, -- 状态：1-启用，0-禁用
     created_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, -- 创建时间
     updated_time TIMESTAMP NULL, -- 更新时间
-    deleted BOOLEAN DEFAULT FALSE -- 逻辑删除标识
+    deleted SMALLINT DEFAULT 0 -- 逻辑删除标识(0/1)
 );
 
 -- 知识表
@@ -49,7 +68,7 @@ CREATE TABLE knowledge (
     updated_time TIMESTAMP NULL, -- 更新时间
     search_count INTEGER DEFAULT 0, -- 搜索次数
     download_count INTEGER DEFAULT 0, -- 下载次数
-    deleted BOOLEAN DEFAULT FALSE -- 逻辑删除标识
+    deleted SMALLINT DEFAULT 0 -- 逻辑删除标识(0/1)
 );
 
 -- 知识-工作空间 关联表（多对多）
@@ -80,7 +99,7 @@ CREATE TABLE knowledge_versions (
     search_count INTEGER DEFAULT 0, -- 搜索次数
     download_count INTEGER DEFAULT 0, -- 下载次数
     change_reason VARCHAR(500) NULL, -- 变更原因
-    deleted BOOLEAN DEFAULT FALSE -- 逻辑删除标识
+    deleted SMALLINT DEFAULT 0 -- 逻辑删除标识(0/1)
 );
 
 -- 附件表
@@ -105,7 +124,7 @@ CREATE TABLE knowledge_likes (
     knowledge_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
     created_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted BOOLEAN DEFAULT FALSE
+    deleted SMALLINT DEFAULT 0
 );
 
 -- 收藏表
@@ -114,7 +133,7 @@ CREATE TABLE knowledge_favorites (
     knowledge_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
     created_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted BOOLEAN DEFAULT FALSE
+    deleted SMALLINT DEFAULT 0
 );
 
 -- 反馈表
@@ -125,7 +144,7 @@ CREATE TABLE knowledge_feedbacks (
     feedback_type VARCHAR(20) NULL CHECK (feedback_type IN ('out_of_date','unclear','not_relevant')), -- 反馈类型
     content TEXT NULL,
     created_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted BOOLEAN DEFAULT FALSE
+    deleted SMALLINT DEFAULT 0
 );
 
 -- 搜索历史表
@@ -135,7 +154,7 @@ CREATE TABLE search_history (
     query VARCHAR(500) NOT NULL, -- 搜索关键词
     search_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, -- 搜索时间
     result_count INTEGER NULL, -- 结果数量
-    deleted BOOLEAN DEFAULT FALSE -- 逻辑删除标识
+    deleted SMALLINT DEFAULT 0 -- 逻辑删除标识(0/1)
 );
 
 -- AI回答反馈（针对具体会话与回答消息）
@@ -148,7 +167,7 @@ CREATE TABLE chat_feedbacks (
     feedback_type VARCHAR(20) NULL CHECK (feedback_type IN ('out_of_date','unclear','not_relevant')), -- 反馈类型
     content TEXT NULL, -- 点踩原因（可空）
     created_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted BOOLEAN DEFAULT FALSE -- 逻辑删除
+    deleted SMALLINT DEFAULT 0 -- 逻辑删除(0/1)
 );
 
 -- RAG会话（持久化）
