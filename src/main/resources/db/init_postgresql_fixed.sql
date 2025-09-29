@@ -230,3 +230,88 @@ INSERT INTO knowledge (name, description, parent_id, node_type, tags, created_by
 INSERT INTO knowledge_workspace (knowledge_id, workspace) VALUES 
 (1, 'WPB'),
 (2, 'GPB');
+
+
+-- 切到目标 schema（若连接串已配 currentSchema，可忽略）
+SET search_path TO knowledge_base, public;
+
+BEGIN;
+
+-- users
+ALTER TABLE IF EXISTS users
+  ALTER COLUMN deleted DROP DEFAULT,
+  ALTER COLUMN deleted TYPE SMALLINT USING (CASE WHEN deleted IS TRUE THEN 1 WHEN deleted IS FALSE THEN 0 ELSE 0 END),
+  ALTER COLUMN deleted SET DEFAULT 0;
+ALTER TABLE IF EXISTS users
+  ADD CONSTRAINT users_deleted_ck CHECK (deleted IN (0,1));
+
+-- knowledge
+ALTER TABLE IF EXISTS knowledge
+  ALTER COLUMN deleted DROP DEFAULT,
+  ALTER COLUMN deleted TYPE SMALLINT USING (CASE WHEN deleted IS TRUE THEN 1 WHEN deleted IS FALSE THEN 0 ELSE 0 END),
+  ALTER COLUMN deleted SET DEFAULT 0;
+ALTER TABLE IF EXISTS knowledge
+  ADD CONSTRAINT knowledge_deleted_ck CHECK (deleted IN (0,1));
+
+-- knowledge_versions
+ALTER TABLE IF EXISTS knowledge_versions
+  ALTER COLUMN deleted DROP DEFAULT,
+  ALTER COLUMN deleted TYPE SMALLINT USING (CASE WHEN deleted IS TRUE THEN 1 WHEN deleted IS FALSE THEN 0 ELSE 0 END),
+  ALTER COLUMN deleted SET DEFAULT 0;
+ALTER TABLE IF EXISTS knowledge_versions
+  ADD CONSTRAINT knowledge_versions_deleted_ck CHECK (deleted IN (0,1));
+
+-- attachments
+ALTER TABLE IF EXISTS attachments
+  ALTER COLUMN deleted DROP DEFAULT,
+  ALTER COLUMN deleted TYPE SMALLINT USING (CASE WHEN deleted IS TRUE THEN 1 WHEN deleted IS FALSE THEN 0 ELSE 0 END),
+  ALTER COLUMN deleted SET DEFAULT 0;
+ALTER TABLE IF EXISTS attachments
+  ADD CONSTRAINT attachments_deleted_ck CHECK (deleted IN (0,1));
+
+-- knowledge_likes
+ALTER TABLE IF EXISTS knowledge_likes
+  ALTER COLUMN deleted DROP DEFAULT,
+  ALTER COLUMN deleted TYPE SMALLINT USING (CASE WHEN deleted IS TRUE THEN 1 WHEN deleted IS FALSE THEN 0 ELSE 0 END),
+  ALTER COLUMN deleted SET DEFAULT 0;
+ALTER TABLE IF EXISTS knowledge_likes
+  ADD CONSTRAINT knowledge_likes_deleted_ck CHECK (deleted IN (0,1));
+
+-- knowledge_favorites
+ALTER TABLE IF EXISTS knowledge_favorites
+  ALTER COLUMN deleted DROP DEFAULT,
+  ALTER COLUMN deleted TYPE SMALLINT USING (CASE WHEN deleted IS TRUE THEN 1 WHEN deleted IS FALSE THEN 0 ELSE 0 END),
+  ALTER COLUMN deleted SET DEFAULT 0;
+ALTER TABLE IF EXISTS knowledge_favorites
+  ADD CONSTRAINT knowledge_favorites_deleted_ck CHECK (deleted IN (0,1));
+
+-- knowledge_feedbacks
+ALTER TABLE IF EXISTS knowledge_feedbacks
+  ALTER COLUMN deleted DROP DEFAULT,
+  ALTER COLUMN deleted TYPE SMALLINT USING (CASE WHEN deleted IS TRUE THEN 1 WHEN deleted IS FALSE THEN 0 ELSE 0 END),
+  ALTER COLUMN deleted SET DEFAULT 0;
+ALTER TABLE IF EXISTS knowledge_feedbacks
+  ADD CONSTRAINT knowledge_feedbacks_deleted_ck CHECK (deleted IN (0,1));
+
+-- search_history
+ALTER TABLE IF EXISTS search_history
+  ALTER COLUMN deleted DROP DEFAULT,
+  ALTER COLUMN deleted TYPE SMALLINT USING (CASE WHEN deleted IS TRUE THEN 1 WHEN deleted IS FALSE THEN 0 ELSE 0 END),
+  ALTER COLUMN deleted SET DEFAULT 0;
+ALTER TABLE IF EXISTS search_history
+  ADD CONSTRAINT search_history_deleted_ck CHECK (deleted IN (0,1));
+
+-- chat_feedbacks（若有）
+ALTER TABLE IF EXISTS chat_feedbacks
+  ALTER COLUMN deleted DROP DEFAULT,
+  ALTER COLUMN deleted TYPE SMALLINT USING (CASE WHEN deleted IS TRUE THEN 1 WHEN deleted IS FALSE THEN 0 ELSE 0 END),
+  ALTER COLUMN deleted SET DEFAULT 0;
+ALTER TABLE IF EXISTS chat_feedbacks
+  ADD CONSTRAINT chat_feedbacks_deleted_ck CHECK (deleted IN (0,1));
+
+-- categories / attachment_versions / category_change_log 等如存在也同样处理：
+-- ALTER TABLE IF EXISTS categories ...（同上模板）
+-- ALTER TABLE IF EXISTS attachment_versions ...
+-- ALTER TABLE IF EXISTS category_change_log ...
+
+COMMIT;
