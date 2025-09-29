@@ -17,9 +17,12 @@ spring:
   
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/knowledge_base?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false&allowMultiQueries=true
-    username: root
-    password: xmc131455
+    # 通过环境变量切换到 PolarDB（MySQL 兼容）：
+    #   DB_HOST=<polardb-endpoint>  DB_PORT=3306  DB_NAME=knowledge_base
+    #   DB_USER=<user>  DB_PASSWORD=<password>
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:knowledge_base}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=${DB_USE_SSL:true}&allowPublicKeyRetrieval=true&allowMultiQueries=true
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:xmc131455}
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5
