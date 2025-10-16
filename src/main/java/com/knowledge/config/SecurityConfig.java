@@ -38,13 +38,13 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
             // admin初始化接口，无需认证
             .antMatchers("/api/admin/users/init-admin").permitAll()
             // Swagger相关路径，无需认证
-            .antMatchers("/swagger-ui/**", "/swagger-ui.html").permitAll()
-            .antMatchers("/v3/api-docs/**", "/v3/api-docs").permitAll()
-            .antMatchers("/swagger-resources/**", "/swagger-resources").permitAll()
+            .antMatchers("/swagger-ui/**", "/swagger-ui.html", "/swagger-ui/index.html").permitAll()
+            .antMatchers("/v3/api-docs/**", "/v3/api-docs", "/api-docs/**", "/api-docs").permitAll()
+            .antMatchers("/swagger-resources/**", "/swagger-resources", "/configuration/**").permitAll()
             .antMatchers("/webjars/**").permitAll()
-            .antMatchers("/swagger-ui/index.html").permitAll()
-            .antMatchers("/swagger-ui/index.html/**").permitAll()
             .antMatchers("/error").permitAll()
+            .antMatchers("/favicon.ico").permitAll()
+            .antMatchers("/").permitAll()
             // 其他所有接口都需要认证
             .anyRequest().authenticated()
             .and()

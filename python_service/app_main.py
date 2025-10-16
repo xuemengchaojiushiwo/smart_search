@@ -8,6 +8,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+from bs4 import BeautifulSoup
 import uvicorn
 import json
 import logging
@@ -1047,7 +1048,7 @@ def process_document_unified(
             from pdf_chunking_strategy import process_pdf_with_matched_chunks
             
             # 使用更小的块大小，确保不超过token限制
-            documents = process_pdf_with_matched_chunks(doc, filename, max_chunk_size=500, overlap=100)
+            documents = process_pdf_with_matched_chunks(doc, filename, max_chunk_size=1500, overlap=100)
             logger.info(f"PDF切分后生成 {len(documents)} 个chunks")
 
             chunks = []
@@ -1441,6 +1442,89 @@ def store_chunks_to_es(chunks: List[Document], knowledge_id: int, workspaces: Op
     """
     stored_count = 0
     
+    # 1. 先存储知识元数据块（用于搜索和匹配）
+    if chunks:
+        first_chunk = chunks[0]
+        metadata = first_chunk.metadata
+        
+        # 构建元数据文本，用于embedding
+        metadata_text_parts = []
+        
+        knowledge_name = metadata.get("knowledge_name", "")
+        if knowledge_name:
+            metadata_text_parts.append(f"知识名称：{knowledge_name}")
+        
+        description = metadata.get("description", "")
+        if description:
+            # 移除HTML标签
+            import re
+            clean_desc = re.sub(r'<[^>]+>', '', description)
+            if clean_desc.strip():
+                metadata_text_parts.append(f"描述：{clean_desc}")
+        
+        tags = metadata.get("tags", "")
+        if tags:
+            if isinstance(tags, list):
+                tags_str = "、".join(tags)
+            else:
+                tags_str = tags
+            if tags_str.strip():
+                metadata_text_parts.append(f"标签：{tags_str}")
+        
+        effective_time = metadata.get("effective_time", "")
+        if effective_time:
+            metadata_text_parts.append(f"生效时间：{effective_time}")
+        
+        source_file = metadata.get("source_file", "")
+        if source_file:
+            metadata_text_parts.append(f"文件名：{source_file}")
+        
+        # 合并元数据文本
+        metadata_text = "\n".join(metadata_text_parts)
+        
+        if metadata_text.strip():
+            try:
+                # 为元数据生成embedding
+                metadata_embedding = get_embedding(metadata_text)
+                
+                if metadata_embedding:
+                    # 生成元数据块ID
+                    metadata_doc_id = hashlib.md5(f"{knowledge_id}_metadata".encode()).hexdigest()
+                    
+                    # 构建元数据ES文档
+                    metadata_es_doc = {
+                        "content": metadata_text,
+                        "embedding": metadata_embedding,
+                        "knowledge_id": knowledge_id,
+                        "knowledge_name": knowledge_name,
+                        "description": description,
+                        "tags": tags,
+                        "effective_time": effective_time,
+                        "source_file": source_file,
+                        "chunk_index": -1,  # 使用-1标识这是元数据块
+                        "chunk_type": "metadata",  # 标识为元数据类型
+                        "page_num": 0,
+                        "bbox": [],
+                        "positions": [],
+                        "mini_chunks": [],
+                        "node_type": "metadata",
+                        "weight": 1.5  # 元数据块权重稍高
+                    }
+                    
+                    # 添加工作空间信息
+                    if workspaces:
+                        metadata_es_doc["workspaces"] = workspaces
+                    
+                    # 存储元数据块到ES
+                    es_client.index(index=ES_CONFIG['index'], id=metadata_doc_id, document=metadata_es_doc)
+                    stored_count += 1
+                    logger.info(f"已存储知识元数据块: knowledge_id={knowledge_id}, 文本长度={len(metadata_text)}")
+                else:
+                    logger.warning(f"知识元数据块embedding生成失败: knowledge_id={knowledge_id}")
+            except Exception as e:
+                logger.error(f"存储知识元数据块失败: {e}")
+    
+    # 2. 存储内容块
     for i, chunk in enumerate(chunks):
         try:
             # 生成文档ID
@@ -1616,7 +1700,7 @@ def chat_with_rag(request: ChatRequest):
         # 1. 向量搜索找到相关chunks
         logger.info(f"[DEBUG] 开始生成问题embedding: question={request.question}")
         # 检查问题长度，确保不超过token限制
-        MAX_QUESTION_LENGTH = 500  # 安全阈值，避免超过512 tokens
+        MAX_QUESTION_LENGTH = 1500  # 安全阈值，避免超过512 tokens
         question_text = request.question
         if len(question_text) > MAX_QUESTION_LENGTH:
             logger.warning(f"问题长度({len(question_text)})超过限制({MAX_QUESTION_LENGTH})，将使用大模型浓缩")
@@ -1639,9 +1723,9 @@ def chat_with_rag(request: ChatRequest):
                 session_id=request.user_id
             )
         
-        # 构建过滤条件 - 简化过滤，先确保基本搜索能工作
+        # 构建过滤条件 - 同时搜索内容块和元数据块
         filters = [
-            {"term": {"chunk_type": "content"}}  # 只搜索内容类型的chunk
+            {"terms": {"chunk_type": ["content", "metadata"]}}  # 搜索内容类型和元数据类型的chunk
         ]
         
         # 如果指定了工作空间，则按工作空间过滤
@@ -1777,7 +1861,7 @@ def chat_with_rag(request: ChatRequest):
         logger.info("[DEBUG] 开始调用大模型生成答案")
         answer = generate_ai_answer(enhanced_prompt)
         logger.info(f"模型回答长度: {len(answer)}")
-        logger.info(f"模型回答前500字符: {answer[:500]}")
+        logger.info(f"模型回答前1500字符: {answer[:1500]}")
         
         # 4.1 解析模型返回的 used_mc_ids（在清理答案之前）
         used_mc_ids = parse_used_mc_ids(answer)
@@ -2161,7 +2245,7 @@ def build_enhanced_rag_prompt(question: str, context_chunks: List[Dict]) -> str:
     
     return prompt
 
-def condense_question_with_llm(question: str, max_length: int = 500) -> str:
+def condense_question_with_llm(question: str, max_length: int = 1500) -> str:
     """
     使用大模型浓缩过长的问题
     
@@ -2203,7 +2287,7 @@ def condense_question_with_llm(question: str, max_length: int = 500) -> str:
         result = manager.chat_completion(
             messages=messages,
             temperature=0.3,
-            max_tokens=500
+            max_tokens=1500
         )
         
         # 检查结果
@@ -2294,6 +2378,32 @@ def extract_keywords_from_content(content: str) -> List[str]:
     
     return keywords[:8]  # 限制关键词数量
 
+@app.post("/api/embedding")
+def get_text_embedding(request: dict):
+    """
+    获取文本的embedding向量
+    """
+    try:
+        text = request.get("text", "")
+        if not text:
+            raise HTTPException(status_code=400, detail="文本不能为空")
+        
+        # 生成embedding
+        embedding = get_embedding(text)
+        
+        if embedding:
+            return {
+                "success": True,
+                "embedding": embedding,
+                "dimension": len(embedding)
+            }
+        else:
+            raise HTTPException(status_code=500, detail="生成embedding失败")
+            
+    except Exception as e:
+        logger.error(f"获取embedding失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取embedding失败: {str(e)}")
+
 @app.get("/api/health")
 def health_check():
     """
@@ -2326,6 +2436,66 @@ def health_check():
     except Exception as e:
         logger.error(f"健康检查失败: {e}")
         raise HTTPException(status_code=500, detail=f"健康检查失败: {str(e)}")
+
+@app.post("/api/diff/summary")
+def generate_diff_summary(request: Dict[str, Any]):
+    """
+    生成两个HTML版本之间的差异总结
+    """
+    try:
+        from diff_summary import generate_diff_summary
+        
+        old_html = request.get("oldHtml", "")
+        new_html = request.get("newHtml", "")
+        
+        if not old_html and not new_html:
+            return {"success": True, "summary": "两个版本都为空，无变更。"}
+        
+        # 尝试使用AI生成总结
+        try:
+            summary = generate_diff_summary(old_html, new_html)
+            if summary and not summary.startswith("无法生成") and not summary.startswith("生成差异总结时发生错误"):
+                return {
+                    "success": True,
+                    "summary": summary
+                }
+        except Exception as inner_e:
+            logger.error(f"调用AI生成差异总结失败: {inner_e}")
+        
+        # 如果AI生成失败，使用规则生成简单总结
+        old_text = BeautifulSoup(old_html, 'html.parser').get_text(separator=' ', strip=True) if old_html else ""
+        new_text = BeautifulSoup(new_html, 'html.parser').get_text(separator=' ', strip=True) if new_html else ""
+        
+        if not old_text:
+            summary = "本次更新：首次添加内容。"
+        elif not new_text:
+            summary = "本次更新：删除了所有内容。"
+        elif old_text == new_text:
+            summary = "本次更新：内容未发生实质变化，可能调整了格式。"
+        else:
+            # 简单比较字符数量
+            old_len = len(old_text)
+            new_len = len(new_text)
+            diff = new_len - old_len
+            
+            if diff > 0:
+                summary = f"本次更新：内容有所增加，新增了约{diff}个字符。"
+            elif diff < 0:
+                summary = f"本次更新：内容有所减少，删除了约{abs(diff)}个字符。"
+            else:
+                summary = "本次更新：内容有所调整，但总字符数保持不变。"
+        
+        return {
+            "success": True,
+            "summary": summary
+        }
+    except Exception as e:
+        logger.error(f"生成差异总结失败: {e}")
+        return {
+            "success": False,
+            "summary": "生成差异总结时发生错误，请查看HTML对比结果。",
+            "error": str(e)
+        }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

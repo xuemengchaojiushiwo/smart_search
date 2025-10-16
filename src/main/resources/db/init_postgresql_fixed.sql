@@ -19,6 +19,7 @@ DROP TABLE IF EXISTS knowledge_likes CASCADE;
 DROP TABLE IF EXISTS knowledge_feedbacks CASCADE;
 DROP TABLE IF EXISTS attachments CASCADE;
 DROP TABLE IF EXISTS knowledge_versions CASCADE;
+DROP TABLE IF EXISTS knowledge_description_versions CASCADE;
 DROP TABLE IF EXISTS knowledge_workspace CASCADE;
 DROP TABLE IF EXISTS search_history CASCADE;
 DROP TABLE IF EXISTS chat_messages CASCADE;
@@ -115,8 +116,31 @@ CREATE TABLE attachments (
     version_id BIGINT NULL, -- 版本ID
     version_number INTEGER NULL, -- 版本号
     download_count INTEGER DEFAULT 0, -- 下载次数
-    deleted BOOLEAN DEFAULT FALSE -- 逻辑删除标识
+    deleted SMALLINT DEFAULT 0 -- 逻辑删除标识(0/1)
 );
+
+-- 知识描述版本表（用于版本对比功能）
+CREATE TABLE knowledge_description_versions (
+    id BIGSERIAL PRIMARY KEY,
+    knowledge_id BIGINT NOT NULL,
+    version VARCHAR(50) NOT NULL,  -- 版本号，如 'V1', 'V2', 'V3'
+    content TEXT NOT NULL,  -- 版本内容（HTML格式）
+    editor VARCHAR(100) NOT NULL,  -- 修改人（用户名）
+    editor_id BIGINT,  -- 修改人ID
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100),
+    deleted SMALLINT DEFAULT 0,  -- 逻辑删除：0-未删除，1-已删除
+    
+    CONSTRAINT uk_knowledge_version UNIQUE (knowledge_id, version)
+);
+
+-- 创建索引
+CREATE INDEX idx_knowledge_id ON knowledge_description_versions(knowledge_id);
+CREATE INDEX idx_version ON knowledge_description_versions(version);
+CREATE INDEX idx_editor ON knowledge_description_versions(editor);
+CREATE INDEX idx_created_at ON knowledge_description_versions(created_at);
 
 -- 点赞表
 CREATE TABLE knowledge_likes (

@@ -185,6 +185,46 @@ public class PythonService {
     }
     
     /**
+     * 获取文本的embedding向量
+     */
+    public java.util.List<Double> getEmbedding(String text) {
+        try {
+            String url = pythonServiceUrl + "/api/embedding";
+            
+            Map<String, String> requestBody = new HashMap<>();
+            requestBody.put("text", text);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            
+            HttpEntity<Map<String, String>> request = new HttpEntity<>(requestBody, headers);
+            
+            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
+            
+            if (response.getStatusCode() == HttpStatus.OK) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> result = JSON.parseObject(response.getBody(), Map.class);
+                
+                if (Boolean.TRUE.equals(result.get("success"))) {
+                    @SuppressWarnings("unchecked")
+                    java.util.List<Double> embedding = (java.util.List<Double>) result.get("embedding");
+                    log.info("获取embedding成功: 文本长度={}, 向量维度={}", text.length(), embedding.size());
+                    return embedding;
+                } else {
+                    log.error("获取embedding失败: {}", result);
+                    return null;
+                }
+            } else {
+                log.error("获取embedding失败, 状态码: {}", response.getStatusCode());
+                return null;
+            }
+        } catch (Exception e) {
+            log.error("调用Python embedding服务失败: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+    
+    /**
      * 检查Python服务健康状态
      */
     public Map<String, Object> checkHealth() {

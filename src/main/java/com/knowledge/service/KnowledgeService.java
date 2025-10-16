@@ -94,8 +94,22 @@ public class KnowledgeService {
             throw new BusinessException("知识不存在");
         }
         
-        // 保存版本 - 暂时注释掉，避免版本冲突
-        // saveVersion(existingKnowledge, "UPDATE", dto.getChangeReason(), currentUser);
+        // 如果描述发生变化，保存旧版本
+        if (dto.getDescription() != null && !dto.getDescription().equals(existingKnowledge.getDescription())) {
+            try {
+                // 保存旧描述为版本（currentUser作为editor）
+                knowledgeVersionService.saveDescriptionVersion(
+                    id,
+                    existingKnowledge.getDescription(), // 保存旧描述
+                    currentUser,
+                    null // editorId暂时为null，后续可扩展
+                );
+                log.info("已保存知识描述版本: knowledgeId={}, editor={}", id, currentUser);
+            } catch (Exception e) {
+                log.warn("保存知识描述版本失败: {}", e.getMessage());
+                // 版本保存失败不影响主流程，继续更新
+            }
+        }
         
         // 更新知识
         BeanUtils.copyProperties(dto, existingKnowledge);

@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -33,7 +34,7 @@ public class WorkspaceService {
     
     public List<Workspace> listByCodes(List<String> codes) {
         if (codes == null || codes.isEmpty()) {
-            return List.of();
+            return new ArrayList<>();
         }
         return mapper.selectList(new LambdaQueryWrapper<Workspace>()
                 .in(Workspace::getCode, codes)
