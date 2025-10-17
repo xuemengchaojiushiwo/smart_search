@@ -1,40 +1,28 @@
-# 智能知识库系统
+# 智能知识库系统 - Python服务
 
-## 系统概述
+## 概述
 
-本系统是一个基于RAG（检索增强生成）的智能知识库管理系统，集成了PyMuPDF Pro、PyMuPDF4LLM、LangChain和极客智坊API，实现文档智能处理和智能问答功能。
+本服务是智能知识库系统的Python后端部分，主要提供以下功能：
 
-## 核心架构
+1. 文档处理与分块
+2. 文本嵌入生成
+3. RAG（检索增强生成）聊天
+4. 知识库搜索
 
-```
-用户上传文档 → PyMuPDF Pro + PyMuPDF4LLM → LangChain分块 → Embedding → ES存储
-                                                                    ↓
-用户提问 → RAG检索 → 极客智坊API → 智能对话
-```
+## 新增功能：多语言嵌入模型支持
 
-## 技术栈
+系统现已支持使用多种嵌入模型：
 
-### 文档处理层
-- **PyMuPDF Pro**: 统一文档处理引擎，支持PDF、Word、Excel、PowerPoint、TXT等
-- **PyMuPDF4LLM**: 基于LlamaIndex的文档结构化处理，保持语义结构
+1. **OpenAI API (text-embedding-3-small)**：原始模型，通过极客智坊API调用
+2. **本地模型 (multilingual-e5-large-instruct)**：新增支持，提供更好的中文理解能力
+3. **自定义API**：预留接口，支持未来扩展
 
-### 分块处理层
-- **LangChain**: 文本分块和向量化
-- **MarkdownHeaderTextSplitter**: 基于Markdown标题的结构化分块
-- **RecursiveCharacterTextSplitter**: 传统分块作为补充
+### 多语言模型优势
 
-### 向量化存储层
-- **Embedding模型**: `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
-- **Elasticsearch**: 向量相似度检索和元数据管理
-
-### LLM对话层
-- **极客智坊API**: GPT-4o-mini模型，基于检索结果的智能问答
-
-## 环境要求
-
-- Python 3.8+
-- Elasticsearch 8.x
-- 至少4GB内存（用于运行embedding模型）
+- 更好的中文语义理解
+- 本地部署，不依赖外部API
+- 更精确的mini-chunks识别
+- 维度更小（1024维 vs 1536维），节省存储空间
 
 ## 安装依赖
 
@@ -42,203 +30,125 @@
 pip install -r requirements.txt
 ```
 
+如果只需要安装多语言嵌入模型相关依赖：
+
+```bash
+pip install sentence-transformers
+```
+
 ## 配置说明
 
-### 主要配置文件
+配置文件位于 `config.py`，主要配置项：
 
-#### `config.py`
 ```python
-# 文档处理配置
-DOCUMENT_CONFIG = {
-    "chunk_size": 1000,
-    "chunk_overlap": 300,
-    "dynamic_overlap": {...}
-}
+# 嵌入维度
+EMBEDDING_DIMS = 1024  # 从1536维改为1024维，适配multilingual-e5-large-instruct
 
-# PyMuPDF Pro配置
-PYMUPDF_PRO_CONFIG = {
-    "enabled": True,
-    "trial_key": "...",
-    "supported_formats": {...}
-}
+# AI API 配置开关
+AI_API_SWITCH = "local"  # 可选值: "geekai", "custom", "local"
 
-# 极客智坊API配置
-GEEKAI_API_KEY = "sk-..."
-GEEKAI_CHAT_URL = "https://geekai.co/api/v1/chat/completions"
+# 默认模型配置
+DEFAULT_EMBEDDING_MODEL = "multilingual-e5-large-instruct"
+
+# 本地Embedding模型配置
+LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-large-instruct"
+LOCAL_EMBEDDING_BATCH_SIZE = 8  # 批处理大小
+LOCAL_EMBEDDING_DEVICE = "cpu"  # 可选: "cpu", "cuda"
 ```
+
+## 快速切换嵌入模型
+
+使用 `switch_embedding.py` 脚本可以快速切换不同的嵌入模型：
+
+```bash
+# 切换到本地模型
+python switch_embedding.py local
+
+# 切换到极客智坊API
+python switch_embedding.py geekai
+
+# 切换到自定义API（需要自行配置）
+python switch_embedding.py custom
+```
+
+## 测试嵌入功能
+
+使用 `test_embedding.py` 脚本可以测试不同嵌入模型的效果：
+
+```bash
+python test_embedding.py
+```
+
+该脚本会测试多个中英文查询，并输出嵌入向量的维度、示例值和相似度信息。
+
+## 注意事项
+
+1. **首次加载本地模型**：首次加载 multilingual-e5-large-instruct 模型可能需要几分钟时间，请耐心等待。
+2. **内存占用**：本地模型需要约2-3GB内存，请确保服务器有足够资源。
+3. **模型下载**：首次使用本地模型时会自动下载模型文件（约1.1GB），请确保网络连接正常。
+
+## 性能对比
+
+| 模型 | 首次加载时间 | 平均嵌入时间/文本 | 内存占用 |
+|------|-------------|-----------------|---------|
+| text-embedding-3-small (API) | N/A | 不确定 (依赖网络) | 低 |
+| multilingual-e5-large-instruct (本地) | ~7.5分钟 | 0.40秒 | ~2-3GB |
+
+更多详细信息请参阅 `embedding_test_report.md`。
 
 ## 启动服务
 
+推荐方式（以模块路径启动，避免相对导入问题）：
+
 ```bash
-# 使用启动脚本
-start_python_service.bat
-
-# 或直接运行
-cd python_service
-python app_main.py
+python -m uvicorn python_service.app_main:app --host 0.0.0.0 --port 8000
 ```
 
-服务将在 http://localhost:8000 启动
+也可直接运行（适合本地快速调试）：
 
-## API接口
-
-### 1. 健康检查
-```
-GET /api/health
+```bash
+python python_service/app_main.py
 ```
 
-### 2. LDAP用户验证
-```
-POST /api/ldap/validate
-{
-  "username": "admin",
-  "password": "password"
-}
-```
+服务默认在 `http://0.0.0.0:8000` 启动，端口可通过命令行 `--port` 指定或在配置中修改。
 
-### 3. 文档处理
-```
-POST /api/document/process
-Content-Type: multipart/form-data
+提示（Windows）：请单独执行每条命令，不要用 `&&` 串联。
 
-参数:
-- file: 上传的文档文件
-- knowledge_id: 知识ID
-- knowledge_name: 知识名称
-- description: 知识描述
-- tags: 标签（逗号分隔）
-- effective_time: 生效时间
-```
+## 模块结构与接口位置
 
-### 4. RAG智能问答
-```
-POST /api/rag/chat
-{
-  "question": "用户问题",
-  "user_id": "用户ID"
-}
-```
+本服务已完成模块化重构，核心模块如下：
 
-## 支持的文件类型
+- `app_main.py`：FastAPI 应用初始化与路由注册（对外应用入口）
+- `routes.py`：对外 API 接口定义（所有路由都集中在此）
+- `models.py`：Pydantic 请求/响应数据模型
+- `document_processor.py`：文档解析与分块处理
+- `es_client.py`：Elasticsearch 读写与嵌入向量存储
+- `rag_engine.py`：RAG 检索与答案生成逻辑
+- `utils.py`：通用工具方法
 
-### PDF文件 (.pdf)
-- 使用 PyMuPDF Pro 解析
-- PyMuPDF4LLM 结构化处理
-- 提取文本内容和页面信息
+## API 列表（routes.py）
 
-### Word文档 (.docx)
-- 使用 PyMuPDF Pro 解析
-- 提取段落文本和表格内容
-- 保持文档结构
+- GET `/`：根路径，返回系统信息
+- GET `/api/health`：健康检查
+- POST `/api/ldap/validate`：LDAP 验证
+- POST `/ldap/verify`：LDAP 验证（模拟）
+- POST `/api/document/process`：文档处理与分块
+- POST `/api/rag/chat`：基于知识库的问答
+- POST `/api/embedding`：获取文本嵌入
+- POST `/api/diff/summary`：生成版本差异总结（HTML）
 
-### Excel表格 (.xlsx)
-- 使用 PyMuPDF Pro 解析
-- 提取所有工作表数据
-- 按行组织数据
+## 常见问题（FAQ）
 
-### PowerPoint演示文稿 (.pptx)
-- 使用 PyMuPDF Pro 解析
-- 提取幻灯片文本内容
-- 按幻灯片组织内容
+- 启动时报相对导入错误：请优先使用模块方式启动
+  - `python -m uvicorn python_service.app_main:app --host 0.0.0.0 --port 8000`
+- 端口被占用：更换端口，例如 `--port 8001`
+- 服务已在后台运行需停止：在 Windows 可使用任务管理器或 `taskkill /F /IM python.exe`
 
-### 文本文件 (.txt)
-- 直接读取文本内容
-- 支持UTF-8编码
+## 开发与测试
 
-## 核心功能
-
-### 1. 智能文档处理
-- **多格式支持**: PDF、Word、Excel、PowerPoint、TXT等
-- **结构化分块**: 基于文档标题层级的智能分块
-- **语义保持**: 保持文档的语义完整性和上下文连贯性
-
-### 2. 向量化存储
-- **高效向量化**: 使用多语言Embedding模型
-- **相似度检索**: 基于余弦相似度的文档检索
-- **元数据管理**: 完整的知识库元数据管理
-
-### 3. 智能问答
-- **RAG检索**: 基于向量相似度的相关文档检索
-- **上下文构建**: 动态组合检索到的文档内容
-- **智能生成**: 使用极客智坊API生成高质量回答
-
-## 性能优化
-
-### 1. 文档处理优化
-- **并行处理**: 支持多文档并行处理
-- **内存管理**: 使用临时文件处理大文档
-- **缓存机制**: 缓存Embedding模型
-
-### 2. 检索优化
-- **索引优化**: ES索引配置优化
-- **查询优化**: 相似度检索算法优化
-- **结果缓存**: 缓存常用查询结果
-
-### 3. API调用优化
-- **超时设置**: 30秒超时保护
-- **重试机制**: API调用失败自动重试
-- **回退策略**: API失败时使用模拟回答
-
-## 监控和日志
-
-### 健康检查
-- **ES连接检查**: 验证Elasticsearch连接
-- **PyMuPDF Pro检查**: 验证文档处理能力
-- **极客智坊API检查**: 验证API连接状态
-
-### 日志记录
-- **处理日志**: 记录文档处理过程
-- **API日志**: 记录极客智坊API调用
-- **错误日志**: 记录异常和错误信息
-
-## 故障排除
-
-### 常见问题
-
-**文档解析失败**
-- 检查文件格式是否正确
-- 确认文件未损坏
-- 查看日志获取详细错误信息
-
-**ES连接失败**
-- 检查ES服务是否启动
-- 确认连接配置正确
-- 检查网络连接
-
-**极客智坊API调用失败**
-- 检查API密钥是否正确
-- 确认网络连接正常
-- 查看API调用日志
-
-**内存不足**
-- 增加系统内存
-- 减少chunk_size配置
-- 分批处理大文档
-
-## 扩展性
-
-### 1. 新文档格式支持
-- 在PyMuPDF Pro配置中添加新格式
-- 在文档处理函数中添加解析逻辑
-
-### 2. 新LLM集成
-- 在配置中添加新的API配置
-- 在对话函数中添加新的API调用
-
-### 3. 新检索策略
-- 在检索函数中添加新的检索算法
-- 支持混合检索策略
-
-## 总结
-
-本系统实现了完整的RAG架构：
-- **文档处理**: PyMuPDF Pro + PyMuPDF4LLM
-- **分块策略**: LangChain结构化分块
-- **向量存储**: Elasticsearch
-- **智能问答**: 极客智坊API + GPT-4o-mini
-
-通过这种架构，系统能够：
-1. 智能处理多种文档格式
-2. 保持文档的语义结构
-3. 提供准确的相似度检索
-4. 生成高质量的智能回答 
+- 规范：各模块高内聚，仅通过最小接口交互，新增功能请补充相应测试
+- 示例脚本：
+  - `test_embedding.py`：嵌入功能测试
+  - `test_rag_api.py`：RAG API 调试
+  - `document_chunking_api.py`：文档分块 API 调试
+- 嵌入模型切换：`python switch_embedding.py [local|geekai|custom]`
