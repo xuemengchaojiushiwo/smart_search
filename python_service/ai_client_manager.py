@@ -27,6 +27,13 @@ except ImportError:
     init_custom_ai_client = None
     get_custom_ai_client = None
 
+try:
+    from local_embedding import get_local_embedding
+    LOCAL_EMBEDDING_AVAILABLE = True
+except ImportError:
+    LOCAL_EMBEDDING_AVAILABLE = False
+    get_local_embedding = None
+
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,6 +45,7 @@ class AIClientManager:
         self.current_api = AI_API_SWITCH
         self.geekai_client = None
         self.custom_ai_client = None
+        self.local_embedding_available = LOCAL_EMBEDDING_AVAILABLE
         self._init_clients()
     
     def _init_clients(self):
@@ -66,9 +74,9 @@ class AIClientManager:
         """切换API
         
         Args:
-            api_name: API名称，支持 "geekai" 或 "custom"
+            api_name: API名称，支持 "geekai", "custom" 或 "local"
         """
-        if api_name not in ["geekai", "custom"]:
+        if api_name not in ["geekai", "custom", "local"]:
             logger.error(f"不支持的API名称: {api_name}")
             return False
         
@@ -78,6 +86,10 @@ class AIClientManager:
         
         if api_name == "custom" and not self.custom_ai_client:
             logger.error("自定义AI客户端未初始化")
+            return False
+        
+        if api_name == "local" and not self.local_embedding_available:
+            logger.error("本地embedding模块不可用")
             return False
         
         self.current_api = api_name
@@ -211,6 +223,28 @@ class AIClientManager:
         Returns:
             向量化结果
         """
+        # 处理local API
+        if self.current_api == "local":
+            if not self.local_embedding_available or not get_local_embedding:
+                return {"error": "本地embedding模块不可用"}
+            
+            try:
+                embeddings = []
+                for text in texts:
+                    embedding = get_local_embedding(text)
+                    if embedding is None:
+                        return {"error": "本地embedding生成失败"}
+                    embeddings.append(embedding)
+                
+                return {
+                    "data": [{"embedding": emb} for emb in embeddings],
+                    "model": "local-multilingual-e5-large-instruct"
+                }
+            except Exception as e:
+                logger.error(f"本地embedding生成异常: {e}")
+                return {"error": f"本地embedding生成异常: {str(e)}"}
+        
+        # 处理其他API
         client = self.get_current_client()
         if not client:
             return {"error": f"当前API {self.current_api} 客户端不可用"}
