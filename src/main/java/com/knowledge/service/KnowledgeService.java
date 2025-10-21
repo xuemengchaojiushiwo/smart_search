@@ -34,6 +34,9 @@ public class KnowledgeService {
     private KnowledgeVersionService knowledgeVersionService;
     
     @Autowired
+    private KnowledgeHistoryVersionService knowledgeHistoryVersionService;
+    
+    @Autowired
     private AttachmentService attachmentService;
     
     // 类目模块已移除
@@ -78,6 +81,15 @@ public class KnowledgeService {
         java.util.List<String> finalWorkspaces = knowledgeWorkspaceService.listWorkspaces(knowledge.getId());
         elasticsearchService.indexKnowledge(knowledge, null, finalWorkspaces);
         
+        // 创建V1版本记录
+        try {
+            knowledgeHistoryVersionService.createInitialVersion(knowledge, currentUser);
+            log.info("知识V1版本创建成功: knowledgeId={}", knowledge.getId());
+        } catch (Exception e) {
+            log.warn("知识V1版本创建失败: knowledgeId={}, error={}", knowledge.getId(), e.getMessage());
+            // 版本创建失败不影响主流程
+        }
+        
         log.info("知识创建成功: ID={}, 名称={}, 工作空间={}", knowledge.getId(), knowledge.getName(), finalWorkspaces);
         return knowledge;
     }
@@ -94,22 +106,9 @@ public class KnowledgeService {
             throw new BusinessException("知识不存在");
         }
         
-        // 如果描述发生变化，保存旧版本
-        if (dto.getDescription() != null && !dto.getDescription().equals(existingKnowledge.getDescription())) {
-            try {
-                // 保存旧描述为版本（currentUser作为editor）
-                knowledgeVersionService.saveDescriptionVersion(
-                    id,
-                    existingKnowledge.getDescription(), // 保存旧描述
-                    currentUser,
-                    null // editorId暂时为null，后续可扩展
-                );
-                log.info("已保存知识描述版本: knowledgeId={}, editor={}", id, currentUser);
-            } catch (Exception e) {
-                log.warn("保存知识描述版本失败: {}", e.getMessage());
-                // 版本保存失败不影响主流程，继续更新
-            }
-        }
+        // 保存当前版本作为旧版本
+        Knowledge oldVersion = new Knowledge();
+        BeanUtils.copyProperties(existingKnowledge, oldVersion);
         
         // 更新知识
         BeanUtils.copyProperties(dto, existingKnowledge);
@@ -119,6 +118,20 @@ public class KnowledgeService {
         knowledgeMapper.updateById(existingKnowledge);
         // 更新工作空间绑定
         knowledgeWorkspaceService.replaceBindings(id, dto.getWorkspaces());
+        
+        // 创建新版本记录
+        try {
+            knowledgeHistoryVersionService.createUpdateVersion(
+                oldVersion, 
+                existingKnowledge, 
+                currentUser, 
+                "知识更新"
+            );
+            log.info("知识版本更新记录创建成功: knowledgeId={}", id);
+        } catch (Exception e) {
+            log.warn("知识版本更新记录创建失败: knowledgeId={}, error={}", id, e.getMessage());
+            // 版本记录失败不影响主流程
+        }
         
         // 更新ES索引
         List<Attachment> attachments = attachmentService.getByKnowledgeId(id);

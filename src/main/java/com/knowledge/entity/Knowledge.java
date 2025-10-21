@@ -2,6 +2,8 @@ package com.knowledge.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
 import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import com.knowledge.mybatis.PostgresJsonbTypeHandler;
+import org.apache.ibatis.type.JdbcType;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -22,10 +24,10 @@ public class Knowledge {
 
     private String nodeType; // folder/doc
     
-    @TableField(typeHandler = JacksonTypeHandler.class)
+    @TableField(typeHandler = PostgresJsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
     private List<String> tags;
 
-    @TableField(typeHandler = JacksonTypeHandler.class)
+    @TableField(typeHandler = PostgresJsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
     private Object tableData; // 结构化表格数据：{columns:[{name,type}], rows:[...]}
     
     private LocalDateTime effectiveStartTime;

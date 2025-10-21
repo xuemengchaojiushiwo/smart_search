@@ -36,7 +36,7 @@ CREATE TABLE users (
     username VARCHAR(100) NULL, -- 用户名(ldap返回)
     staffid VARCHAR(50) UNIQUE NOT NULL, -- 工号
     email VARCHAR(100) UNIQUE NULL, -- 邮箱
-    role VARCHAR(20) NULL, -- 兼容旧字段
+    role VARCHAR(50) NULL, -- 兼容旧字段
     display_name VARCHAR(150) NULL, -- 显示名称
     profile_picture VARCHAR(255) NULL, -- 头像URL
     password VARCHAR(255) NULL, -- 密码(迁移保留)
@@ -79,6 +79,68 @@ CREATE TABLE knowledge_workspace (
     workspace VARCHAR(50) NOT NULL,
     UNIQUE(knowledge_id, workspace)
 );
+-- 知识历史版本表 - 存储每个版本的完整信息
+CREATE TABLE knowledge_history_versions (
+    id BIGSERIAL PRIMARY KEY,
+    knowledge_id BIGINT NOT NULL, -- 知识ID
+    version_number INTEGER NOT NULL, -- 版本号（数字）
+    version_name VARCHAR(50) NOT NULL, -- 版本名称（如 V1, V2, V3 等）
+
+    -- 知识基本信息（完整复制）
+    name VARCHAR(200) NOT NULL, -- 知识名称
+    description TEXT, -- 知识描述
+    parent_id BIGINT NULL, -- 父级ID
+    node_type VARCHAR(50) NULL, -- 节点类型
+    tags JSONB, -- 标签列表
+    table_data JSONB, -- 结构化表格数据：{columns:[{name,type}], rows:[...]}
+    effective_start_time TIMESTAMP NULL, -- 生效开始时间
+    effective_end_time TIMESTAMP NULL, -- 生效结束时间
+    status INTEGER DEFAULT 1, -- 状态
+
+    -- 统计信息
+    search_count INTEGER DEFAULT 0, -- 搜索次数
+    download_count INTEGER DEFAULT 0, -- 下载次数
+
+    -- 版本管理信息
+    change_type VARCHAR(50) NOT NULL, -- 变更类型：CREATE, UPDATE, DELETE
+    change_reason VARCHAR(500) NULL, -- 变更原因
+    change_summary TEXT NULL, -- 变更摘要
+
+    -- 字段变更详情（JSON格式存储具体变更）
+    field_changes JSONB NULL, -- 存储具体哪些字段发生了变化
+
+    -- 审计信息
+    created_by VARCHAR(50) NOT NULL, -- 创建人
+    created_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, -- 创建时间
+    updated_by VARCHAR(50) NULL, -- 更新人
+    updated_time TIMESTAMP NULL, -- 更新时间
+
+    -- 逻辑删除
+    deleted SMALLINT DEFAULT 0 ,-- 逻辑删除标识(0/1)
+
+    -- 外键约束
+    CONSTRAINT fk_knowledge_history_versions_knowledge_id
+        FOREIGN KEY (knowledge_id) REFERENCES knowledge(id) ON DELETE CASCADE,
+
+    -- 唯一约束
+    CONSTRAINT uk_knowledge_history_version
+        UNIQUE (knowledge_id, version_number)
+);
+
+-- 为知识历史版本表创建索引
+CREATE INDEX idx_knowledge_history_versions_knowledge_id ON knowledge_history_versions(knowledge_id);
+CREATE INDEX idx_knowledge_history_versions_version_number ON knowledge_history_versions(version_number);
+CREATE INDEX idx_knowledge_history_versions_created_time ON knowledge_history_versions(created_time);
+
+-- 添加表注释
+COMMENT ON TABLE knowledge_history_versions IS '知识历史版本表 - 存储每个版本的完整信息，支持详细的版本比较和变更追踪';
+COMMENT ON COLUMN knowledge_history_versions.knowledge_id IS '知识ID';
+COMMENT ON COLUMN knowledge_history_versions.version_number IS '版本号（数字）';
+COMMENT ON COLUMN knowledge_history_versions.version_name IS '版本名称（如V1, V2, V3等）';
+COMMENT ON COLUMN knowledge_history_versions.change_type IS '变更类型：CREATE-创建, UPDATE-更新, DELETE-删除';
+COMMENT ON COLUMN knowledge_history_versions.change_reason IS '变更原因';
+COMMENT ON COLUMN knowledge_history_versions.change_summary IS '变更摘要';
+COMMENT ON COLUMN knowledge_history_versions.field_changes IS '字段变更详情（JSON格式）';
 
 -- 知识版本表
 CREATE TABLE knowledge_versions (

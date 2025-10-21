@@ -482,4 +482,5 @@ public class KnowledgeController {
             return ResponseEntity.status(500).build();
         }
     }
+
 } 

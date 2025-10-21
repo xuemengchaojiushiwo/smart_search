@@ -1,9 +1,13 @@
 package com.knowledge.controller;
 
-import com.knowledge.entity.KnowledgeDescriptionVersion;
+import com.knowledge.entity.KnowledgeHistoryVersion;
 import com.knowledge.service.DescriptionDiffService;
 import com.knowledge.service.DiffSummaryService;
 import com.knowledge.service.KnowledgeVersionService;
+import com.knowledge.service.KnowledgeHistoryVersionService;
+import com.knowledge.vo.ApiResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -19,36 +23,33 @@ public class KnowledgeDiffController {
     private final DescriptionDiffService descriptionDiffService;
     private final KnowledgeVersionService knowledgeVersionService;
     private final DiffSummaryService diffSummaryService;
+    private final KnowledgeHistoryVersionService knowledgeHistoryVersionService;
+
 
     /**
-     * 生成知识描述的差异高亮 HTML（仅新增/删除）。
-     * 入参：旧版与新版描述（HTML 字符串），或后续可扩展为按 versionId 加载。
-     * 返回：可直接渲染的 HTML 片段（含内联样式）。
-     */
-    @PostMapping(value = "/diff", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.TEXT_HTML_VALUE)
-    public String diffHtml(@RequestBody DiffRequest req) {
-        String oldHtml = req.getOldHtml();
-        String newHtml = req.getNewHtml();
-        return descriptionDiffService.generateHtmlDiff(oldHtml, newHtml);
-    }
-
-    /**
-     * 通过 knowledgeId + fromVersion/toVersion 直接生成对比。
+     * 通过 knowledgeId + fromVersion/toVersion 直接生成对比（从新表获取数据）。
      * 若指定版本不存在，则回退到当前知识描述；若两边均为空，返回空对象。
      * 返回包含AI总结和HTML对比结果的JSON响应。
      */
     @GetMapping(value = "/{knowledgeId}/diff", produces = MediaType.APPLICATION_JSON_VALUE)
     public DiffResponse diffByVersion(@PathVariable("knowledgeId") Long knowledgeId,
-                                @RequestParam(value = "from", required = false) String fromVersion,
-                                @RequestParam(value = "to", required = false) String toVersion) {
+                                @RequestParam(value = "from", required = false) Integer fromVersionNumber,
+                                @RequestParam(value = "to", required = false) Integer toVersionNumber) {
         String fromHtml = null;
         String toHtml = null;
 
-        if (fromVersion != null && !fromVersion.isEmpty()) {
-            fromHtml = knowledgeVersionService.findDescriptionByVersion(knowledgeId, fromVersion);
+        // 从新表获取版本数据
+        if (fromVersionNumber != null) {
+            KnowledgeHistoryVersion fromVersion = knowledgeHistoryVersionService.getVersion(knowledgeId, fromVersionNumber);
+            if (fromVersion != null) {
+                fromHtml = fromVersion.getDescription();
+            }
         }
-        if (toVersion != null && !toVersion.isEmpty()) {
-            toHtml = knowledgeVersionService.findDescriptionByVersion(knowledgeId, toVersion);
+        if (toVersionNumber != null) {
+            KnowledgeHistoryVersion toVersion = knowledgeHistoryVersionService.getVersion(knowledgeId, toVersionNumber);
+            if (toVersion != null) {
+                toHtml = toVersion.getDescription();
+            }
         }
 
         // 回退到当前描述
@@ -61,8 +62,8 @@ public class KnowledgeDiffController {
 
         DiffResponse response = new DiffResponse();
         response.setKnowledgeId(knowledgeId);
-        response.setFromVersion(fromVersion);
-        response.setToVersion(toVersion);
+        response.setFromVersion(fromVersionNumber != null ? fromVersionNumber.toString() : null);
+        response.setToVersion(toVersionNumber != null ? toVersionNumber.toString() : null);
 
         if ((fromHtml == null || fromHtml.isEmpty()) && (toHtml == null || toHtml.isEmpty())) {
             response.setHtmlDiff("");
@@ -84,81 +85,57 @@ public class KnowledgeDiffController {
     }
     
     /**
-     * 通过 knowledgeId + fromVersion/toVersion 直接生成HTML对比。
-     * 与JSON版本相同，但只返回HTML片段，方便前端直接嵌入iframe或div。
-     */
-    @GetMapping(value = "/{knowledgeId}/diff/html", produces = MediaType.TEXT_HTML_VALUE)
-    public String diffByVersionHtml(@PathVariable("knowledgeId") Long knowledgeId,
-                                @RequestParam(value = "from", required = false) String fromVersion,
-                                @RequestParam(value = "to", required = false) String toVersion) {
-        String fromHtml = null;
-        String toHtml = null;
-
-        if (fromVersion != null && !fromVersion.isEmpty()) {
-            fromHtml = knowledgeVersionService.findDescriptionByVersion(knowledgeId, fromVersion);
-        }
-        if (toVersion != null && !toVersion.isEmpty()) {
-            toHtml = knowledgeVersionService.findDescriptionByVersion(knowledgeId, toVersion);
-        }
-
-        // 回退到当前描述
-        if (fromHtml == null) {
-            fromHtml = knowledgeVersionService.findCurrentDescription(knowledgeId);
-        }
-        if (toHtml == null) {
-            toHtml = knowledgeVersionService.findCurrentDescription(knowledgeId);
-        }
-
-        if ((fromHtml == null || fromHtml.isEmpty()) && (toHtml == null || toHtml.isEmpty())) {
-            return "<p>无法获取版本内容，请确认版本号是否正确。</p>";
-        }
-        
-        String safeFromHtml = fromHtml == null ? "" : fromHtml;
-        String safeToHtml = toHtml == null ? "" : toHtml;
-        return descriptionDiffService.generateHtmlDiff(safeFromHtml, safeToHtml);
-    }
-    
-    /**
-     * 获取知识的所有版本列表
-     * @param knowledgeId 知识ID
-     * @return 版本列表
+     * 获取知识的所有历史版本列表
      */
     @GetMapping("/{knowledgeId}/versions")
-    public VersionListResponse getVersionList(@PathVariable("knowledgeId") Long knowledgeId) {
-        List<KnowledgeDescriptionVersion> versions = knowledgeVersionService.getVersionList(knowledgeId);
+    @Operation(summary = "获取知识历史版本列表", description = "根据知识ID获取所有历史版本的基本信息")
+    public ApiResponse<List<VersionListItem>> getKnowledgeVersions(
+            @Parameter(description = "知识ID", required = true, example = "1") 
+            @PathVariable Long knowledgeId) {
         
-        VersionListResponse response = new VersionListResponse();
-        response.setKnowledgeId(knowledgeId);
-        response.setVersions(versions);
-        response.setTotal(versions.size());
-        
-        return response;
+        try {
+            List<KnowledgeHistoryVersion> versions = knowledgeHistoryVersionService.getKnowledgeVersions(knowledgeId);
+            
+            // 转换为简化的版本列表
+            List<VersionListItem> versionList = versions.stream()
+                    .map(version -> {
+                        VersionListItem item = new VersionListItem();
+                        item.setId(version.getId());
+                        item.setVersionNumber(version.getVersionNumber());
+                        item.setVersionName(version.getVersionName());
+                        item.setName(version.getName());
+                        item.setChangeType(version.getChangeType());
+                        item.setChangeReason(version.getChangeReason());
+                        item.setCreatedBy(version.getCreatedBy());
+                        item.setCreatedTime(version.getCreatedTime());
+                        return item;
+                    })
+                    .collect(java.util.stream.Collectors.toList());
+            
+            return ApiResponse.success("获取版本列表成功", versionList);
+        } catch (Exception e) {
+            return ApiResponse.error("获取版本列表失败: " + e.getMessage());
+        }
     }
     
     /**
-     * 获取指定版本的详情
+     * 获取指定版本的详情（从新表获取）
      * @param knowledgeId 知识ID
-     * @param version 版本号
+     * @param versionNumber 版本号
      * @return 版本详情
      */
-    @GetMapping("/{knowledgeId}/versions/{version}")
-    public VersionDetailResponse getVersionDetail(@PathVariable("knowledgeId") Long knowledgeId,
-                                                   @PathVariable("version") String version) {
-        KnowledgeDescriptionVersion versionEntity = knowledgeVersionService.getVersionByNumber(knowledgeId, version);
-        
-        VersionDetailResponse response = new VersionDetailResponse();
-        if (versionEntity != null) {
-            response.setId(versionEntity.getId());
-            response.setKnowledgeId(versionEntity.getKnowledgeId());
-            response.setVersion(versionEntity.getVersion());
-            response.setContent(versionEntity.getContent());
-            response.setEditor(versionEntity.getEditor());
-            response.setEditorId(versionEntity.getEditorId());
-            response.setCreatedAt(versionEntity.getCreatedAt());
-            response.setCreatedBy(versionEntity.getCreatedBy());
+    @GetMapping("/{knowledgeId}/versions/{versionNumber}")
+    public ApiResponse<KnowledgeHistoryVersion> getVersionDetail(@PathVariable("knowledgeId") Long knowledgeId,
+                                                                 @PathVariable("versionNumber") Integer versionNumber) {
+        try {
+            KnowledgeHistoryVersion version = knowledgeHistoryVersionService.getVersion(knowledgeId, versionNumber);
+            if (version == null) {
+                return ApiResponse.error("指定版本的知识不存在");
+            }
+            return ApiResponse.success("获取版本详情成功", version);
+        } catch (Exception e) {
+            return ApiResponse.error("获取版本详情失败: " + e.getMessage());
         }
-        
-        return response;
     }
 
     @Data
@@ -168,31 +145,27 @@ public class KnowledgeDiffController {
     }
     
     @Data
-    public static class VersionListResponse {
-        private Long knowledgeId;
-        private List<KnowledgeDescriptionVersion> versions;
-        private Integer total;
-    }
-    
-    @Data
-    public static class VersionDetailResponse {
-        private Long id;
-        private Long knowledgeId;
-        private String version;
-        private String content;
-        private String editor;
-        private Long editorId;
-        private java.time.LocalDateTime createdAt;
-        private String createdBy;
-    }
-    
-    @Data
     public static class DiffResponse {
         private Long knowledgeId;
         private String fromVersion;
         private String toVersion;
         private String htmlDiff; // HTML格式的差异对比结果
         private String summary;  // AI生成的差异总结
+    }
+    
+    /**
+     * 版本列表项
+     */
+    @Data
+    public static class VersionListItem {
+        private Long id;
+        private Integer versionNumber;
+        private String versionName;
+        private String name;
+        private String changeType;
+        private String changeReason;
+        private String createdBy;
+        private java.time.LocalDateTime createdTime;
     }
 }
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import os
 
 # Elasticsearch配置
-EMBEDDING_DIMS = 1024  # 从1536维改为1024维，适配multilingual-e5-large-instruct  # 从1536维改为1024维，适配multilingual-e5-large-instruct
+EMBEDDING_DIMS = 1536  # 从1536维改为1024维，适配multilingual-e5-large-instruct  # 从1536维改为1024维，适配multilingual-e5-large-instruct
 ES_INDEX = 'knowledge_base_new'
 
 ES_CONFIG = {
@@ -113,7 +113,7 @@ CHUNKING_CONFIG = {
 }
 
 # AI API 配置开关
-AI_API_SWITCH = "local"  # 可选值: "geekai", "custom", "local"
+AI_API_SWITCH = "geekai"  # 可选值: "geekai", "custom", "local"
 
 # 极客智坊 API 配置（优先从本地 secrets.json 读取，其次环境变量）
 def _load_secret_key_from_file() -> str:
@@ -143,7 +143,7 @@ CUSTOM_AI_EMBEDDING_URL = f"{CUSTOM_AI_API_BASE}/embeddings" if CUSTOM_AI_API_BA
 
 # 默认模型配置
 DEFAULT_CHAT_MODEL = "qwen3-32b"
-DEFAULT_EMBEDDING_MODEL = "multilingual-e5-large-instruct"  # 从text-embedding-3-small改为multilingual-e5-large-instruct
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"  # 从text-embedding-3-small改为multilingual-e5-large-instruct
 
 # 自定义AI模型配置
 CUSTOM_AI_CHAT_MODEL = "default"
@@ -158,6 +158,10 @@ LOCAL_EMBEDDING_DEVICE = "cpu"  # 可选: "cpu", "cuda"
 HOST = "0.0.0.0"
 PORT = 8000
 DEBUG = True
+
+# 上传目录配置
+UPLOAD_DIR = Path(__file__).parent / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 # 日志配置
 LOG_LEVEL = "INFO"

@@ -19,10 +19,9 @@ except ImportError:
     PYMUPDF_AVAILABLE = False
     print("❌ PyMuPDF 不可用")
 
-# 可选：用于优化Excel分页的预处理
+# Excel解析能力
 try:
     from openpyxl import load_workbook
-    from openpyxl.worksheet.properties import PageSetupProperties
     OPENPYXL_AVAILABLE = True
 except Exception:
     OPENPYXL_AVAILABLE = False
@@ -71,37 +70,6 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def _group_positions_to_mini_chunks(chunk_text: str, positions: List[Dict]) -> List[Dict]:
-    """将一个chunk的 span 级 positions 聚合为行/句级 mini_chunks。
-    - 按 (page, block_idx, line_idx) 分组
-    - 合并文本与bbox并返回
-    - 不做embedding，仅随文档存储
-    """
-    try:
-        groups: Dict[tuple, List[Dict]] = {}
-        for p in positions or []:
-            key = (int(p.get("page", 1)), int(p.get("block_idx", -1)), int(p.get("line_idx", -1)))
-            groups.setdefault(key, []).append(p)
-        mini_chunks: List[Dict] = []
-        for (page, block_idx, line_idx), spans in groups.items():
-            spans_sorted = sorted(spans, key=lambda s: int(s.get("span_idx", 0)))
-            text = "".join([s.get("text", "") for s in spans_sorted]).strip()
-            if not text:
-                continue
-            x0 = min(s["bbox"][0] for s in spans_sorted)
-            y0 = min(s["bbox"][1] for s in spans_sorted)
-            x1 = max(s["bbox"][2] for s in spans_sorted)
-            y1 = max(s["bbox"][3] for s in spans_sorted)
-            mini_chunks.append({
-                "text": text,
-                "page": page,
-                "bbox": [x0, y0, x1, y1],
-                "block_idx": block_idx,
-                "line_idx": line_idx,
-            })
-        return mini_chunks
-    except Exception:
-        return []
 
 
 def create_simple_pdf_from_txt(src_path: str, out_path: Optional[str] = None) -> str:
@@ -111,69 +79,14 @@ def create_simple_pdf_from_txt(src_path: str, out_path: Optional[str] = None) ->
     out_pdf = out_path or tempfile.mktemp(suffix='.pdf')
     os.makedirs(os.path.dirname(out_pdf), exist_ok=True)
     doc = fitz.open()
-    # 解决中文显示为问号：嵌入系统CJK字体（优先微软雅黑 / 宋体 / 黑体）
-    def _register_cjk_font(_doc: fitz.Document) -> str:
-        try:
-            candidates = [
-                r"C:\\Windows\\Fonts\\msyh.ttc",
-                r"C:\\Windows\\Fonts\\msyh.ttf",
-                r"C:\\Windows\\Fonts\\simsun.ttc",
-                r"C:\\Windows\\Fonts\\simhei.ttf",
-            ]
-            for p in candidates:
-                if os.path.exists(p):
-                    _doc.insert_font(fontname="CJK", fontfile=p)
-                    return "CJK"
-        except Exception:
-            pass
-        return "helv"
-    cjk_font = _register_cjk_font(doc)
     page = doc.new_page(width=595, height=842)
     rect = fitz.Rect(40, 50, 555, 800)
-    page.insert_textbox(rect, text[:50000], fontsize=11, fontname=cjk_font, align=0)
+    page.insert_textbox(rect, text[:50000], fontsize=11, fontname="helv", align=0)
     doc.save(out_pdf)
     doc.close()
     return out_pdf
 
 
-def preprocess_xlsx_for_better_pdf(src_path: str) -> Optional[str]:
-    """
-    针对Excel进行分页优化：横向、按宽度适配、设置打印区域与边距；
-    生成临时xlsx副本（不改动原文件）。返回临时文件路径；失败返回None。
-    """
-    if not OPENPYXL_AVAILABLE:
-        return None
-
-    try:
-        wb = load_workbook(src_path, data_only=True)
-        for ws in wb.worksheets:
-            # 横向打印 + 宽度适配
-            ws.page_setup.orientation = 'landscape'
-            ws.page_setup.fitToWidth = 1
-            ws.page_setup.fitToHeight = 0
-            if ws.sheet_properties.pageSetUpPr is None:
-                ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
-            else:
-                ws.sheet_properties.pageSetUpPr.fitToPage = True
-            # 居中与边距
-            ws.print_options.horizontalCentered = True
-            ws.page_margins.left = 0.5
-            ws.page_margins.right = 0.5
-            ws.page_margins.top = 0.6
-            ws.page_margins.bottom = 0.6
-            # 打印区域覆盖已用范围
-            try:
-                dim = ws.calculate_dimension()  # 如 'A1:G200'
-                ws.print_area = dim
-            except Exception:
-                pass
-        fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
-        os.close(fd)
-        wb.save(tmp_path)
-        return tmp_path
-    except Exception as e:
-        logger.warning(f"Excel预处理失败，使用原文件转换: {e}")
-        return None
 
 
 def parse_excel_native(file_path: str, filename: str, knowledge_id: int) -> List[Document]:
@@ -373,22 +286,6 @@ def create_simple_pdf_from_docx(src_path: str, out_path: str) -> tuple[str, List
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     pdf = fitz.open()
-    def _register_cjk_font(_doc: fitz.Document) -> str:
-        try:
-            candidates = [
-                r"C:\\Windows\\Fonts\\msyh.ttc",
-                r"C:\\Windows\\Fonts\\msyh.ttf",
-                r"C:\\Windows\\Fonts\\simsun.ttc",
-                r"C:\\Windows\\Fonts\\simhei.ttf",
-            ]
-            for p in candidates:
-                if os.path.exists(p):
-                    _doc.insert_font(fontname="CJK", fontfile=p)
-                    return "CJK"
-        except Exception:
-            pass
-        return "helv"
-    cjk_font = _register_cjk_font(pdf)
     page_width, page_height = 595.0, 842.0  # A4 72dpi points
     margin_left, margin_right, margin_top, margin_bottom = 40.0, 40.0, 50.0, 50.0
     usable_width = page_width - margin_left - margin_right
@@ -414,7 +311,7 @@ def create_simple_pdf_from_docx(src_path: str, out_path: str) -> tuple[str, List
         rect = fitz.Rect(margin_left, cursor_y, margin_left + usable_width, cursor_y + 200.0)
         new_page_if_needed(rect.height)
         rect = fitz.Rect(margin_left, cursor_y, margin_left + usable_width, cursor_y + 200.0)
-        page.insert_textbox(rect, text, fontsize=11, fontname=cjk_font, align=0)
+        page.insert_textbox(rect, text, fontsize=11, fontname="helv", align=0)
         # 粗略估算占用高度：按文本长度估计行数
         approx_chars_per_line = 90
         lines = max(1, (len(text) // approx_chars_per_line) + 1)
@@ -502,22 +399,6 @@ def create_simple_pdf_from_pptx(src_path: str, out_path: str) -> tuple[str, List
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     pdf = fitz.open()
-    def _register_cjk_font(_doc: fitz.Document) -> str:
-        try:
-            candidates = [
-                r"C:\\Windows\\Fonts\\msyh.ttc",
-                r"C:\\Windows\\Fonts\\msyh.ttf",
-                r"C:\\Windows\\Fonts\\simsun.ttc",
-                r"C:\\Windows\\Fonts\\simhei.ttf",
-            ]
-            for p in candidates:
-                if os.path.exists(p):
-                    _doc.insert_font(fontname="CJK", fontfile=p)
-                    return "CJK"
-        except Exception:
-            pass
-        return "helv"
-    cjk_font = _register_cjk_font(pdf)
     # python-pptx 的尺寸为 Length 类型，用 int() 取 EMU 值更稳妥
     slide_w_pts = (int(prs.slide_width) / EMU_PER_INCH) * POINTS_PER_INCH
     slide_h_pts = (int(prs.slide_height) / EMU_PER_INCH) * POINTS_PER_INCH
@@ -538,7 +419,7 @@ def create_simple_pdf_from_pptx(src_path: str, out_path: str) -> tuple[str, List
                 y1 = y0 + (int(shape.height) / EMU_PER_INCH) * POINTS_PER_INCH
                 rect = fitz.Rect(x0, y0, x1, y1)
                 # 在对应矩形内写入文本
-                page.insert_textbox(rect, text, fontsize=12, fontname=cjk_font, align=0)
+                page.insert_textbox(rect, text, fontsize=12, fontname="helv", align=0)
                 positions.append({"text": text, "bbox": [x0, y0, x1, y1], "page": s_idx + 1})
             except Exception:
                 continue

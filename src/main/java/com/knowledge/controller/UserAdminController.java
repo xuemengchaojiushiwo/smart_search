@@ -31,7 +31,7 @@ public class UserAdminController {
     public ApiResponse<Page<User>> list(
             @Parameter(description = "页码") @RequestParam(required = false) Integer page,
             @Parameter(description = "每页大小") @RequestParam(required = false) Integer size,
-            @Parameter(description = "关键词(用户名/工号/邮箱)") @RequestParam(required = false) String keyword,
+            @Parameter(description = "关键词(用户名/工号/邮箱/显示名称)") @RequestParam(required = false) String keyword,
             @Parameter(description = "按workspace过滤(ALL/WPB/GPB等)") @RequestParam(required = false, name = "workspace") String workspace
     ) {
         int p = (page == null || page < 1) ? 1 : page;
@@ -47,7 +47,8 @@ public class UserAdminController {
         if (keyword != null && !keyword.isEmpty()) {
             qw.and(w -> w.like(User::getUsername, keyword)
                     .or().like(User::getStaffId, keyword)
-                    .or().like(User::getEmail, keyword));
+                    .or().like(User::getEmail, keyword)
+                    .or().like(User::getDisplayName, keyword));
         }
         if (workspace != null && !workspace.isEmpty() && !"ALL".equalsIgnoreCase(workspace)) {
             qw.like(User::getWorkspace, workspace);
