@@ -17,14 +17,10 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="智能知识库系统", version="2.0.0")
 
 # 导入路由
-try:
-    from .routes import router
-except ImportError:
-    # 当直接运行时使用绝对导入
-    import sys
-    import os
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    from routes import router
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from routes import router
 
 # 注册路由
 app.include_router(router)

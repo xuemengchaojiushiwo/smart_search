@@ -13,26 +13,19 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import List, Optional, Dict, Any
 from bs4 import BeautifulSoup
 
-try:
-    from .models import (
-        LdapValidateRequest, LdapValidateResponse, ChatRequest, ChatResponse,
-        DocumentProcessRequest, DocumentProcessResponse
-    )
-    from .document_processor import process_document_unified
-    from .rag_engine import chat_with_rag
-    from .es_client import get_embedding
-except ImportError:
-    # 当直接运行时使用绝对导入
-    import sys
-    import os
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    from models import (
-        LdapValidateRequest, LdapValidateResponse, ChatRequest, ChatResponse,
-        DocumentProcessRequest, DocumentProcessResponse
-    )
-    from document_processor import process_document_unified
-    from rag_engine import chat_with_rag
-    from es_client import get_embedding
+# 使用绝对导入
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from models import (
+    LdapValidateRequest, LdapValidateResponse, ChatRequest, ChatResponse,
+    DocumentProcessRequest, DocumentProcessResponse,
+    BatchEmbeddingRequest, BatchEmbeddingResponse, BatchEmbeddingStatus
+)
+from document_processor import process_document_unified
+from rag_engine import chat_with_rag
+from es_client import get_embedding
+from batch_embedding_service import batch_embedding_service
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +230,7 @@ def health_check():
     """
     try:
         # 检查ES连接
-        from .es_client import es_client
+        from es_client import es_client
         es_info = es_client.info()
         
         # 检查PyMuPDF可用性
@@ -250,7 +243,7 @@ def health_check():
         # 检查极客智坊API
         try:
             # 使用AI管理器获取授权信息
-            from .ai_client_manager import get_ai_manager
+            from ai_client_manager import get_ai_manager
             manager = get_ai_manager()
             headers = {"Authorization": f"Bearer {manager.get_api_info().get('current_api')}"}
             response = requests.get("https://geekai.co/api/v1/models", headers=headers, timeout=5)
@@ -332,4 +325,94 @@ def generate_diff_summary(request: Dict[str, Any]):
             "success": False,
             "summary": "生成差异总结时发生错误，请查看HTML对比结果。",
             "error": str(e)
+        }
+
+
+@router.post("/api/batch/embedding/start", response_model=BatchEmbeddingResponse)
+async def start_batch_embedding(request: BatchEmbeddingRequest):
+    """
+    启动批量文档嵌入处理
+    - 支持断点续传（通过start_knowledge_id参数）
+    - 支持批量处理（通过batch_size参数）
+    - 支持强制重新处理（通过force_reprocess参数）
+    """
+    try:
+        logger.info(f"启动批量嵌入处理: {request}")
+        
+        # 检查是否已有处理任务在运行
+        if batch_embedding_service.is_running:
+            return BatchEmbeddingResponse(
+                success=False,
+                message="已有批量处理任务在运行中，请等待完成或先停止当前任务",
+                processed_count=batch_embedding_service.processed_count,
+                total_count=batch_embedding_service.total_count,
+                current_knowledge_id=batch_embedding_service.current_knowledge_id
+            )
+        
+        # 启动批量处理
+        result = await batch_embedding_service.process_batch_embedding(request)
+        return result
+        
+    except Exception as e:
+        logger.error(f"启动批量嵌入处理失败: {e}")
+        return BatchEmbeddingResponse(
+            success=False,
+            message=f"启动批量嵌入处理失败: {str(e)}",
+            processed_count=0,
+            total_count=0
+        )
+
+
+@router.get("/api/batch/embedding/status", response_model=BatchEmbeddingStatus)
+def get_batch_embedding_status():
+    """
+    获取批量文档嵌入处理状态
+    """
+    try:
+        return batch_embedding_service.get_status()
+    except Exception as e:
+        logger.error(f"获取批量嵌入状态失败: {e}")
+        return BatchEmbeddingStatus(
+            is_running=False,
+            processed_count=0,
+            total_count=0,
+            errors=[{"error": f"获取状态失败: {str(e)}"}]
+        )
+
+
+@router.post("/api/batch/embedding/stop")
+def stop_batch_embedding():
+    """
+    停止批量文档嵌入处理
+    """
+    try:
+        batch_embedding_service.stop_processing()
+        return {
+            "success": True,
+            "message": "批量处理已停止"
+        }
+    except Exception as e:
+        logger.error(f"停止批量嵌入处理失败: {e}")
+        return {
+            "success": False,
+            "message": f"停止批量嵌入处理失败: {str(e)}"
+        }
+
+
+@router.post("/api/batch/embedding/reset")
+def reset_batch_embedding():
+    """
+    重置批量文档嵌入处理状态
+    """
+    try:
+        batch_embedding_service.reset_status()
+        return {
+            "success": True,
+            "message": "批量处理状态已重置"
+        }
+    except Exception as e:
+        logger.error(f"重置批量嵌入状态失败: {e}")
+        return {
+            "success": False,
+            "message": f"重置批量嵌入状态失败: {str(e)}"
         }

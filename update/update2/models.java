@@ -65,3 +65,30 @@ class DocumentProcessResponse(BaseModel):
     message: str
     chunks_count: int
     knowledge_id: int
+
+
+class BatchEmbeddingRequest(BaseModel):
+    start_knowledge_id: Optional[int] = None  # 起始知识ID，用于断点续传
+    batch_size: int = 10  # 每批处理数量
+    file_base_path: str = "uploads"  # 文件基础路径
+    force_reprocess: bool = False  # 是否强制重新处理已存在的文档
+
+
+class BatchEmbeddingResponse(BaseModel):
+    success: bool
+    message: str
+    processed_count: int
+    total_count: int
+    current_knowledge_id: Optional[int] = None
+    next_knowledge_id: Optional[int] = None
+    errors: List[Dict[str, Any]] = []
+
+
+class BatchEmbeddingStatus(BaseModel):
+    is_running: bool
+    processed_count: int
+    total_count: int
+    current_knowledge_id: Optional[int] = None
+    start_time: Optional[str] = None
+    last_update_time: Optional[str] = None
+    errors: List[Dict[str, Any]] = []
