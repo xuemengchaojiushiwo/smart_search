@@ -247,4 +247,43 @@ public class PythonService {
             throw new BusinessException("Python服务不可用");
         }
     }
+    
+    /**
+     * 为没有附件的知识生成元数据embedding并存储到ES
+     */
+    public boolean indexKnowledgeMetadata(com.knowledge.entity.Knowledge knowledge, java.util.List<String> workspaces) {
+        try {
+            String url = pythonServiceUrl + "/api/knowledge/metadata";
+            
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("knowledge_id", knowledge.getId());
+            requestBody.put("knowledge_name", knowledge.getName());
+            requestBody.put("description", knowledge.getDescription());
+            requestBody.put("tags", knowledge.getTags());
+            requestBody.put("effective_time", knowledge.getEffectiveStartTime() != null ? 
+                knowledge.getEffectiveStartTime().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME) : null);
+            requestBody.put("workspaces", workspaces);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+            
+            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
+            
+            if (response.getStatusCode() == HttpStatus.OK) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> result = JSON.parseObject(response.getBody(), Map.class);
+                boolean success = Boolean.TRUE.equals(result.get("success"));
+                log.info("知识元数据embedding生成{}: knowledgeId={}", success ? "成功" : "失败", knowledge.getId());
+                return success;
+            } else {
+                log.error("知识元数据embedding生成失败, 状态码: {}", response.getStatusCode());
+                return false;
+            }
+        } catch (Exception e) {
+            log.error("调用Python知识元数据embedding服务失败: {}", e.getMessage(), e);
+            return false;
+        }
+    }
 }

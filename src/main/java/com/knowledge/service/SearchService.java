@@ -159,27 +159,41 @@ public class SearchService {
                         try { kr.setChunkIndex(Integer.valueOf(String.valueOf(ref.get("chunk_index")))); } catch (Exception ignore) {}
                     }
                     kr.setChunkType(ref.get("chunk_type") != null ? String.valueOf(ref.get("chunk_type")) : null);
-                    Object bbox = ref.get("bbox_union");
-                    if (bbox instanceof List) {
-                        @SuppressWarnings("unchecked")
-                        List<Object> bboxList = (List<Object>) bbox;
-                        List<List<Double>> bboxUnion = new ArrayList<>();
-                        for (Object item : bboxList) {
-                            if (item instanceof List) {
-                                @SuppressWarnings("unchecked")
-                                List<Number> nums = (List<Number>) item;
-                                List<Double> doubles = new ArrayList<>();
-                                for (Number n : nums) { doubles.add(n.doubleValue()); }
-                                bboxUnion.add(doubles);
+
+                    // 如果命中的是知识元数据（非文件内容），则不返回定位信息
+                    boolean isMetadataHit = (kr.getChunkType() != null && "metadata".equalsIgnoreCase(kr.getChunkType()))
+                            || kr.getSourceFile() == null || String.valueOf(kr.getSourceFile()).trim().isEmpty();
+
+                    if (!isMetadataHit) {
+                        Object bbox = ref.get("bbox_union");
+                        if (bbox instanceof List) {
+                            @SuppressWarnings("unchecked")
+                            List<Object> bboxList = (List<Object>) bbox;
+                            List<List<Double>> bboxUnion = new ArrayList<>();
+                            for (Object item : bboxList) {
+                                if (item instanceof List) {
+                                    @SuppressWarnings("unchecked")
+                                    List<Number> nums = (List<Number>) item;
+                                    List<Double> doubles = new ArrayList<>();
+                                    for (Number n : nums) { doubles.add(n.doubleValue()); }
+                                    bboxUnion.add(doubles);
+                                }
                             }
+                            kr.setBboxUnion(bboxUnion);
                         }
-                        kr.setBboxUnion(bboxUnion);
-                    }
-                    if (ref.get("char_start") != null) {
-                        try { kr.setCharStart(Integer.valueOf(String.valueOf(ref.get("char_start")))); } catch (Exception ignore) {}
-                    }
-                    if (ref.get("char_end") != null) {
-                        try { kr.setCharEnd(Integer.valueOf(String.valueOf(ref.get("char_end")))); } catch (Exception ignore) {}
+                        if (ref.get("char_start") != null) {
+                            try { kr.setCharStart(Integer.valueOf(String.valueOf(ref.get("char_start")))); } catch (Exception ignore) {}
+                        }
+                        if (ref.get("char_end") != null) {
+                            try { kr.setCharEnd(Integer.valueOf(String.valueOf(ref.get("char_end")))); } catch (Exception ignore) {}
+                        }
+                    } else {
+                        // 清空定位类字段
+                        kr.setPageNum(null);
+                        kr.setChunkIndex(null);
+                        kr.setBboxUnion(null);
+                        kr.setCharStart(null);
+                        kr.setCharEnd(null);
                     }
                     // 拼接下载链接（若能在DB中找到同名附件）
                     try {

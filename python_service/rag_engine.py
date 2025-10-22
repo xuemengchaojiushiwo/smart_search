@@ -153,7 +153,14 @@ def build_enhanced_rag_prompt_with_mini_chunks(question: str, context_chunks: Li
         metadata = chunk['metadata']
         
         # 构建每个chunk的详细上下文信息
-        chunk_context = f"""
+        # 对于元数据块，不显示页码和文档名
+        if metadata.get('chunk_type') == 'metadata' or not metadata.get('document_name') or metadata.get('document_name') == 'N/A':
+            chunk_context = f"""
+📄 引用 {i+1}:
+📝 内容: {chunk.get('content', '')}
+"""
+        else:
+            chunk_context = f"""
 📄 引用 {i+1}:
 📋 文档: {metadata.get('document_name', 'N/A')}
 📄 页码: {metadata.get('page_num', 'N/A')}
@@ -227,7 +234,7 @@ def build_enhanced_rag_prompt_with_mini_chunks(question: str, context_chunks: Li
 2. 如果问题涉及特定文档，请确保答案来自正确的文档
 3. 如果问题没有指定具体文档，请基于所有相关信息给出综合回答
 4. 答案要具体、准确，包含关键数据
-5. 用中文回答，并说明信息来源（如"根据文档第X页"）
+5. 用中文回答，对于元数据内容不需要说明页码信息
 6. 如果提供的文档中完全没有与问题相关的信息，请明确说明"文档中未提及相关内容"或"未找到相关信息"
 7. 在回答末尾，请返回一个JSON格式的响应，包含你实际使用的小块ID（按相关性从高到低排序）：
    {{"used_mc_ids": ["30:page_num:chunk_index:mini_chunk_index", ...]}}
@@ -285,7 +292,7 @@ def build_enhanced_rag_prompt(question: str, context_chunks: List[Dict]) -> str:
 2. 如果问题涉及特定文档，请确保答案来自正确的文档
 3. 如果问题没有指定具体文档，请基于所有相关信息给出综合回答
 4. 答案要具体、准确，包含关键数据
-5. 用中文回答，并说明信息来源（如"根据文档第X页"）
+5. 用中文回答，对于元数据内容不需要说明页码信息
 6. 如果提供的文档中完全没有与问题相关的信息，请明确说明"文档中未提及相关内容"或"未找到相关信息"
 
 请开始回答：
@@ -427,9 +434,29 @@ def chat_with_rag(question: str, user_id: str, source_file: Optional[str] = None
             sample_mc_ids = list(mcid_to_entry.keys())[:5]
             logger.info(f"映射中的示例mc_ids: {sample_mc_ids}")
         
-        # 3. 构建增强的RAG提示词（包含小块清单）
+        # 3. 先做与问题的相关性过滤，避免无关文档（如基金）干扰“机器人”问题
+        def _contains_question_keyword(_chunk: Dict) -> bool:
+            try:
+                q = (question or "").strip()
+                if not q:
+                    return True
+                content = str(_chunk.get('content', '') or '')
+                meta = _chunk.get('metadata', {}) or {}
+                name = str(meta.get('knowledge_name', '') or '')
+                desc = str(meta.get('description', '') or '')
+                doc = str(meta.get('document_name', '') or '')
+                hay = '\n'.join([content, name, desc, doc])
+                return q in hay
+            except Exception:
+                return True
+
+        filtered_context_chunks = [c for c in context_chunks if _contains_question_keyword(c)]
+        if not filtered_context_chunks:
+            filtered_context_chunks = context_chunks
+
+        # 4. 构建增强的RAG提示词（包含小块清单）
         logger.info("[DEBUG] 开始构建RAG提示词")
-        enhanced_prompt = build_enhanced_rag_prompt_with_mini_chunks(question, context_chunks)
+        enhanced_prompt = build_enhanced_rag_prompt_with_mini_chunks(question, filtered_context_chunks)
         logger.info(f"[DEBUG] RAG提示词长度: {len(enhanced_prompt)}")
         logger.info(f"[DEBUG] RAG提示词前200字符: {enhanced_prompt[:200]}...")
         
@@ -441,6 +468,14 @@ def chat_with_rag(question: str, user_id: str, source_file: Optional[str] = None
         
         # 4.1 解析模型返回的 used_mc_ids（在清理答案之前）
         used_mc_ids = parse_used_mc_ids(answer)
+        # 清理掉答案中的 JSON 片段，得到纯文本
+        try:
+            import re
+            cleaned_answer = re.sub(r"```json[\s\S]*?```", "", answer)
+            cleaned_answer = re.sub(r"\{[^}]*\"used_mc_ids\"[^}]*\}[^\n]*", "", cleaned_answer)
+            cleaned_answer = cleaned_answer.strip()
+        except Exception:
+            cleaned_answer = answer
         
         # 4.2 检查AI是否明确表示无法从文档中找到相关信息
         no_relevant_info_keywords = [
@@ -523,6 +558,7 @@ def chat_with_rag(question: str, user_id: str, source_file: Optional[str] = None
             
         chunks_with_mini_chunks = []
         chunks_without_mini_chunks = []
+        metadata_only_chunks = []  # 记录命中为元数据的chunk
         
         for chunk in context_chunks:
             metadata = chunk['metadata']
@@ -536,10 +572,20 @@ def chat_with_rag(question: str, user_id: str, source_file: Optional[str] = None
                 logger.info(f"Chunk {metadata.get('chunk_index')} 相似度过低 ({relevance_score:.4f} < {SIMILARITY_THRESHOLD})，跳过")
                 continue
             
+            # 检查是否为元数据命中（非文件内容）：严格依赖 chunk_type=metadata
+            chunk_type = str(metadata.get('chunk_type') or '').lower()
+            is_metadata = (chunk_type == 'metadata')
+
             # 检查是否有mini-chunks
             key = (metadata.get('knowledge_id', 0), metadata.get('chunk_index', 0))
             hl_for_chunk = chunk_key_to_highlights.get(key, [])
             
+            if is_metadata:
+                metadata_only_chunks.append(chunk)
+                logger.info(f"Chunk {metadata.get('chunk_index')} 为元数据命中（非文件内容），将不进行小块定位")
+                # 元数据也可计入候选，后续特殊处理
+                continue
+
             if hl_for_chunk:
                 chunks_with_mini_chunks.append(chunk)
                 logger.info(f"Chunk {metadata.get('chunk_index')} 有 {len(hl_for_chunk)} 个mini-chunks")
@@ -547,12 +593,15 @@ def chat_with_rag(question: str, user_id: str, source_file: Optional[str] = None
                 chunks_without_mini_chunks.append(chunk)
                 logger.info(f"Chunk {metadata.get('chunk_index')} 无mini-chunks")
         
-        # 只选择有mini-chunks的chunk，确保引用只包含AI实际使用的信息
+        # 只选择有mini-chunks的chunk；若没有，则退化到元数据命中或其他策略
         selected_chunks = chunks_with_mini_chunks.copy()
         
+        if not selected_chunks and metadata_only_chunks:
+            # 若没有可定位的小块，但命中元数据，则用元数据块作为返回对象
+            selected_chunks = metadata_only_chunks.copy()
         if not selected_chunks:
             selected_chunks = []
-        logger.info(f"选择了 {len(selected_chunks)} 个chunks（有mini-chunks: {len(chunks_with_mini_chunks)}, 无mini-chunks: 0）")
+        logger.info(f"选择了 {len(selected_chunks)} 个chunks（有mini-chunks: {len(chunks_with_mini_chunks)}, 元数据: {len(metadata_only_chunks)}）")
 
         # 如果阈值过滤后没有任何chunk，或者所有选中的chunk都没有mini-chunks，通过LLM返回顺序取第一个有效的mini-chunk所属的大块作为兜底
         if not selected_chunks or all(len(chunk.get('metadata', {}).get('mini_chunks', [])) == 0 for chunk in selected_chunks):
@@ -582,9 +631,44 @@ def chat_with_rag(question: str, user_id: str, source_file: Optional[str] = None
                 selected_chunks = [max(context_chunks, key=lambda x: x.get('metadata', {}).get('relevance_score', 0))]
                 logger.info(f"无法找到有效mini-chunks，使用相似度最高的chunk作为兜底: chunk_index={selected_chunks[0].get('metadata', {}).get('chunk_index')}")
         
+        metadata_hit_exists = False
         for chunk in selected_chunks:
             # 重要：在第二次循环中重新获取本次chunk的metadata，避免沿用上一次循环的metadata
             metadata = chunk['metadata']
+
+            # 若为元数据命中（非文件内容），直接构造零坐标引用并跳过定位流程
+            chunk_type = str(metadata.get('chunk_type') or '').lower()
+            is_metadata = (chunk_type == 'metadata')
+            if is_metadata:
+                metadata_hit_exists = True
+                # 规范化 tags 为 List[str]
+                _tags_val = metadata.get('tags')
+                if isinstance(_tags_val, list):
+                    _tags = [str(x) for x in _tags_val]
+                elif isinstance(_tags_val, str):
+                    _tags = [t for t in [
+                        _tags_val.strip()
+                    ] if t]
+                else:
+                    _tags = []
+
+                references.append({
+                    "knowledge_id": metadata.get('knowledge_id'),
+                    "knowledge_name": metadata.get('knowledge_name', ''),
+                    "description": metadata.get('description', ''),
+                    "tags": _tags,
+                    "effective_time": metadata.get('effective_time') or "",
+                    "attachments": [],
+                    "source_file": "",
+                    "page_num": 0,
+                    "chunk_index": -1,
+                    "chunk_type": "metadata",
+                    "bbox_union": [[0.0, 0.0, 0.0, 0.0]],
+                    "char_start": 0,
+                    "char_end": 0,
+                    "relevance": metadata.get('relevance_score', 0.0)
+                })
+                continue
 
             # 从模型返回的 used_mc_ids 中取本 chunk 的高亮，只取属于当前chunk的mini-chunk
             key = (metadata.get('knowledge_id', 0), metadata.get('chunk_index', 0))
@@ -638,15 +722,26 @@ def chat_with_rag(question: str, user_id: str, source_file: Optional[str] = None
             # 如果有选中的小块，使用小块的页码；否则使用chunk的页码
             page_num_to_use = hl_for_chunk[0].get("page", metadata.get('page_num', 0)) if hl_for_chunk else metadata.get('page_num', 0)
             
+            # 规范化 tags 为 List[str]
+            _tags_val2 = metadata.get('tags')
+            if isinstance(_tags_val2, list):
+                _tags2 = [str(x) for x in _tags_val2]
+            elif isinstance(_tags_val2, str):
+                _tags2 = [t for t in [
+                    _tags_val2.strip()
+                ] if t]
+            else:
+                _tags2 = []
+
             references.append(KnowledgeReference(
                 knowledge_id=int(metadata.get('knowledge_id', 0)) if metadata.get('knowledge_id') is not None else 0,
                 knowledge_name=metadata.get('knowledge_name', ''),
                 description=metadata.get('description', ''),
-                tags=[metadata.get('tags', '')] if isinstance(metadata.get('tags', ''), str) else metadata.get('tags', []),
-                effective_time=metadata.get('effective_time', ''),
-                attachments=[metadata.get('document_name', '')],
+                tags=_tags2,
+                effective_time=(metadata.get('effective_time') or ""),
+                attachments=([metadata.get('document_name')] if metadata.get('document_name') else []),
                 relevance=relevance_score,
-                source_file=metadata.get('document_name', ''),
+                source_file=(metadata.get('document_name') or ""),
                 page_num=page_num_to_use,  # 使用选中小块的页码或大块的页码
                 chunk_index=metadata.get('chunk_index', 0),
                 chunk_type="content",
@@ -657,8 +752,30 @@ def chat_with_rag(question: str, user_id: str, source_file: Optional[str] = None
         
         logger.info(f"相似度过滤后，返回 {len(references)} 个引用（阈值: {SIMILARITY_THRESHOLD}）")
         
+        # 若答案为空或只包含JSON，且存在元数据命中，用元数据内容生成直接答案
+        if (not cleaned_answer) and metadata_hit_exists:
+            try:
+                meta_ref = None
+                # references 里元数据是 dict；内容chunk是 pydantic 模型
+                for r in references:
+                    if isinstance(r, dict):
+                        if r.get("chunk_type") == "metadata" or not r.get("source_file"):
+                            meta_ref = r
+                            break
+                if meta_ref is not None:
+                    import re as _re
+                    desc = meta_ref.get("description") or ""
+                    desc_text = _re.sub(r"<[^>]+>", "", desc).strip()
+                    name = meta_ref.get("knowledge_name") or ""
+                    if desc_text:
+                        cleaned_answer = desc_text
+                    elif name:
+                        cleaned_answer = name
+            except Exception:
+                pass
+        
         return ChatResponse(
-            answer=answer,
+            answer=cleaned_answer if cleaned_answer else answer,
             references=references,
             session_id=user_id
         )

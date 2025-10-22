@@ -282,3 +282,109 @@ def search_es_chunks(query_embedding: list, filters: List[Dict] = None, size: in
     except Exception as e:
         logger.error(f"ES搜索失败: {e}")
         return []
+
+
+def store_knowledge_metadata_to_es(metadata: Dict[str, Any]) -> bool:
+    """
+    为没有附件的知识生成元数据embedding并存储到ES
+    
+    Args:
+        metadata: 知识元数据字典，包含knowledge_id, knowledge_name, description等
+        
+    Returns:
+        bool: 是否存储成功
+    """
+    try:
+        knowledge_id = metadata.get("knowledge_id")
+        knowledge_name = metadata.get("knowledge_name", "")
+        description = metadata.get("description", "")
+        tags = metadata.get("tags", [])
+        effective_time = metadata.get("effective_time", "")
+        source_file = metadata.get("source_file", "")
+        workspaces = metadata.get("workspaces", [])
+        
+        if not knowledge_id:
+            logger.error("知识ID不能为空")
+            return False
+        
+        # 构建元数据文本
+        metadata_text_parts = []
+        
+        if knowledge_name:
+            metadata_text_parts.append(f"知识名称：{knowledge_name}")
+        
+        if description:
+            metadata_text_parts.append(f"知识描述：{description}")
+        
+        if tags:
+            if isinstance(tags, list):
+                tags_str = "、".join(tags)
+            else:
+                tags_str = str(tags)
+            metadata_text_parts.append(f"标签：{tags_str}")
+        
+        if effective_time:
+            metadata_text_parts.append(f"生效时间：{effective_time}")
+        
+        if source_file:
+            metadata_text_parts.append(f"文件名：{source_file}")
+        
+        # 合并元数据文本
+        metadata_text = "\n".join(metadata_text_parts)
+        
+        if not metadata_text.strip():
+            logger.warning(f"知识元数据为空，跳过存储: knowledge_id={knowledge_id}")
+            return False
+        
+        # 为元数据生成embedding
+        metadata_embedding = get_embedding(metadata_text)
+        
+        if not metadata_embedding:
+            logger.warning(f"知识元数据块embedding生成失败: knowledge_id={knowledge_id}")
+            return False
+        
+        # 校验embedding维度
+        try:
+            emb_len = len(metadata_embedding) if metadata_embedding is not None else 0
+        except Exception:
+            emb_len = 0
+        if emb_len != EMBEDDING_DIMS:
+            logger.error(f"知识元数据块embedding维度不匹配: got={emb_len}, expected={EMBEDDING_DIMS}")
+            return False
+        
+        # 生成元数据块ID
+        metadata_doc_id = hashlib.md5(f"{knowledge_id}_metadata".encode()).hexdigest()
+        
+        # 构建元数据ES文档
+        metadata_es_doc = {
+            "content": metadata_text,
+            "embedding": metadata_embedding,
+            "knowledge_id": knowledge_id,
+            "knowledge_name": knowledge_name,
+            "description": description,
+            "tags": tags,
+            "effective_time": effective_time,
+            "source_file": source_file,
+            "chunk_index": -1,  # 使用-1标识这是元数据块
+            "chunk_type": "metadata",  # 标识为元数据类型
+            "page_num": 0,
+            "bbox": [],
+            "positions": [],
+            "mini_chunks": [],
+            "node_type": "metadata",
+            "weight": 1.5  # 元数据块权重稍高
+        }
+        
+        # 添加工作空间信息
+        if workspaces:
+            metadata_es_doc["workspaces"] = workspaces
+        
+        # 存储元数据块到ES
+        es_client.index(index=ES_CONFIG['index'], id=metadata_doc_id, document=metadata_es_doc)
+        
+        logger.info(f"已存储知识元数据块: knowledge_id={knowledge_id}, 文本长度={len(metadata_text)}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"存储知识元数据块失败: {e}")
+        return False

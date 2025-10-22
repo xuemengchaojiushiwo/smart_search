@@ -52,6 +52,13 @@ public class ElasticsearchService {
      */
     public boolean indexKnowledge(Knowledge knowledge, List<Attachment> attachments, List<String> workspaces) {
         try {
+            // 如果没有附件，调用Python服务生成知识元数据的embedding
+            if (attachments == null || attachments.isEmpty()) {
+                log.info("知识无附件，生成元数据embedding: knowledgeId={}", knowledge.getId());
+                return indexKnowledgeMetadata(knowledge, workspaces);
+            }
+            
+            // 有附件的情况，使用原有的简单索引方式
             Map<String, Object> document = new HashMap<>();
 
             // 基本信息 - 只设置ES mapping中存在的字段
@@ -66,12 +73,10 @@ public class ElasticsearchService {
             }
             
             // 附件信息
-            if (attachments != null && !attachments.isEmpty()) {
-                for (Attachment attachment : attachments) {
-                    document.put("attachment_name", attachment.getFileName());
-                    document.put("file_type", attachment.getFileType());
-                    break; // 只设置第一个附件的信息
-                }
+            for (Attachment attachment : attachments) {
+                document.put("attachment_name", attachment.getFileName());
+                document.put("file_type", attachment.getFileType());
+                break; // 只设置第一个附件的信息
             }
             
             // 工作空间信息
@@ -96,6 +101,26 @@ public class ElasticsearchService {
 
         } catch (Exception e) {
             log.error("知识索引失败: ID={}, 错误信息: {}", knowledge.getId(), e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * 为没有附件的知识生成元数据embedding并存储到ES
+     */
+    private boolean indexKnowledgeMetadata(Knowledge knowledge, List<String> workspaces) {
+        try {
+            // 调用Python服务生成知识元数据的embedding
+            boolean success = pythonService.indexKnowledgeMetadata(knowledge, workspaces);
+            if (success) {
+                log.info("知识元数据embedding生成成功: ID={}, 标题={}", knowledge.getId(), knowledge.getName());
+                return true;
+            } else {
+                log.warn("知识元数据embedding生成失败: ID={}, 标题={}", knowledge.getId(), knowledge.getName());
+                return false;
+            }
+        } catch (Exception e) {
+            log.error("生成知识元数据embedding失败: ID={}, 错误信息: {}", knowledge.getId(), e.getMessage(), e);
             return false;
         }
     }

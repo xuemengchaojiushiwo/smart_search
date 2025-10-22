@@ -223,6 +223,51 @@ def get_text_embedding(request: dict):
         raise HTTPException(status_code=500, detail=f"获取embedding失败: {str(e)}")
 
 
+@router.post("/api/knowledge/metadata")
+def index_knowledge_metadata(request: Dict[str, Any]):
+    """
+    为没有附件的知识生成元数据embedding并存储到ES
+    """
+    try:
+        knowledge_id = request.get("knowledge_id")
+        knowledge_name = request.get("knowledge_name", "")
+        description = request.get("description", "")
+        tags = request.get("tags", [])
+        effective_time = request.get("effective_time", "")
+        workspaces = request.get("workspaces", [])
+        
+        if not knowledge_id:
+            raise HTTPException(status_code=400, detail="知识ID不能为空")
+        
+        # 导入ES客户端
+        from es_client import store_knowledge_metadata_to_es
+        
+        # 构建元数据
+        metadata = {
+            "knowledge_id": knowledge_id,
+            "knowledge_name": knowledge_name,
+            "description": description,
+            "tags": tags,
+            "effective_time": effective_time,
+            "source_file": "",  # 无附件时为空
+            "workspaces": workspaces
+        }
+        
+        # 存储到ES
+        success = store_knowledge_metadata_to_es(metadata)
+        
+        if success:
+            logger.info(f"知识元数据embedding存储成功: knowledge_id={knowledge_id}")
+            return {"success": True, "message": "知识元数据embedding存储成功"}
+        else:
+            logger.error(f"知识元数据embedding存储失败: knowledge_id={knowledge_id}")
+            return {"success": False, "message": "知识元数据embedding存储失败"}
+            
+    except Exception as e:
+        logger.error(f"处理知识元数据embedding失败: {e}")
+        raise HTTPException(status_code=500, detail=f"处理知识元数据embedding失败: {str(e)}")
+
+
 @router.get("/api/health")
 def health_check():
     """
