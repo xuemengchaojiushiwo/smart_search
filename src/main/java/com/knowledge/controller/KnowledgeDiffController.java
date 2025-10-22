@@ -27,61 +27,76 @@ public class KnowledgeDiffController {
 
 
     /**
-     * 通过 knowledgeId + fromVersion/toVersion 直接生成对比（从新表获取数据）。
-     * 若指定版本不存在，则回退到当前知识描述；若两边均为空，返回空对象。
-     * 返回包含AI总结和HTML对比结果的JSON响应。
+     * 获取版本对比的AI总结（从新表获取数据）
      */
-    @GetMapping(value = "/{knowledgeId}/diff", produces = MediaType.APPLICATION_JSON_VALUE)
-    public DiffResponse diffByVersion(@PathVariable("knowledgeId") Long knowledgeId,
-                                @RequestParam(value = "from", required = false) Integer fromVersionNumber,
-                                @RequestParam(value = "to", required = false) Integer toVersionNumber) {
-        String fromHtml = null;
-        String toHtml = null;
+    @GetMapping(value = "/{knowledgeId}/diff/summary", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "获取版本对比AI总结", description = "根据版本号获取两个版本的AI对比总结")
+    public ApiResponse<DiffSummaryResponse> getDiffSummary(@PathVariable("knowledgeId") Long knowledgeId,
+                                                          @RequestParam(value = "from", required = false) Integer fromVersionNumber,
+                                                          @RequestParam(value = "to", required = false) Integer toVersionNumber) {
+        try {
+            String fromHtml = getVersionDescription(knowledgeId, fromVersionNumber);
+            String toHtml = getVersionDescription(knowledgeId, toVersionNumber);
 
-        // 从新表获取版本数据
-        if (fromVersionNumber != null) {
-            KnowledgeHistoryVersion fromVersion = knowledgeHistoryVersionService.getVersion(knowledgeId, fromVersionNumber);
-            if (fromVersion != null) {
-                fromHtml = fromVersion.getDescription();
+            DiffSummaryResponse response = new DiffSummaryResponse();
+            response.setKnowledgeId(knowledgeId);
+            response.setFromVersion(fromVersionNumber != null ? fromVersionNumber.toString() : null);
+            response.setToVersion(toVersionNumber != null ? toVersionNumber.toString() : null);
+
+            if ((fromHtml == null || fromHtml.isEmpty()) && (toHtml == null || toHtml.isEmpty())) {
+                response.setSummary("无法获取版本内容，请确认版本号是否正确。");
+                return ApiResponse.success("获取AI总结成功", response);
+            }
+
+            // 获取AI总结
+            String safeFromHtml = fromHtml == null ? "" : fromHtml;
+            String safeToHtml = toHtml == null ? "" : toHtml;
+            String summary = diffSummaryService.getSummary(safeFromHtml, safeToHtml);
+            response.setSummary(summary);
+            
+            return ApiResponse.success("获取AI总结成功", response);
+        } catch (Exception e) {
+            return ApiResponse.error("获取AI总结失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取版本对比的HTML差异（从新表获取数据）
+     */
+    @GetMapping(value = "/{knowledgeId}/diff/html", produces = MediaType.TEXT_HTML_VALUE)
+    @Operation(summary = "获取版本对比HTML差异", description = "根据版本号获取两个版本的HTML差异对比")
+    public String getDiffHtml(@PathVariable("knowledgeId") Long knowledgeId,
+                             @RequestParam(value = "from", required = false) Integer fromVersionNumber,
+                             @RequestParam(value = "to", required = false) Integer toVersionNumber) {
+        try {
+            String fromHtml = getVersionDescription(knowledgeId, fromVersionNumber);
+            String toHtml = getVersionDescription(knowledgeId, toVersionNumber);
+
+            if ((fromHtml == null || fromHtml.isEmpty()) && (toHtml == null || toHtml.isEmpty())) {
+                return "<p>无法获取版本内容，请确认版本号是否正确。</p>";
+            }
+
+            // 生成HTML差异
+            String safeFromHtml = fromHtml == null ? "" : fromHtml;
+            String safeToHtml = toHtml == null ? "" : toHtml;
+            return descriptionDiffService.generateHtmlDiff(safeFromHtml, safeToHtml);
+        } catch (Exception e) {
+            return "<p>生成HTML差异失败: " + e.getMessage() + "</p>";
+        }
+    }
+
+    /**
+     * 获取版本描述内容的辅助方法
+     */
+    private String getVersionDescription(Long knowledgeId, Integer versionNumber) {
+        if (versionNumber != null) {
+            KnowledgeHistoryVersion version = knowledgeHistoryVersionService.getVersion(knowledgeId, versionNumber);
+            if (version != null) {
+                return version.getDescription();
             }
         }
-        if (toVersionNumber != null) {
-            KnowledgeHistoryVersion toVersion = knowledgeHistoryVersionService.getVersion(knowledgeId, toVersionNumber);
-            if (toVersion != null) {
-                toHtml = toVersion.getDescription();
-            }
-        }
-
         // 回退到当前描述
-        if (fromHtml == null) {
-            fromHtml = knowledgeVersionService.findCurrentDescription(knowledgeId);
-        }
-        if (toHtml == null) {
-            toHtml = knowledgeVersionService.findCurrentDescription(knowledgeId);
-        }
-
-        DiffResponse response = new DiffResponse();
-        response.setKnowledgeId(knowledgeId);
-        response.setFromVersion(fromVersionNumber != null ? fromVersionNumber.toString() : null);
-        response.setToVersion(toVersionNumber != null ? toVersionNumber.toString() : null);
-
-        if ((fromHtml == null || fromHtml.isEmpty()) && (toHtml == null || toHtml.isEmpty())) {
-            response.setHtmlDiff("");
-            response.setSummary("无法获取版本内容，请确认版本号是否正确。");
-            return response;
-        }
-
-        // 生成HTML差异
-        String safeFromHtml = fromHtml == null ? "" : fromHtml;
-        String safeToHtml = toHtml == null ? "" : toHtml;
-        String htmlDiff = descriptionDiffService.generateHtmlDiff(safeFromHtml, safeToHtml);
-        response.setHtmlDiff(htmlDiff);
-        
-        // 获取AI总结
-        String summary = diffSummaryService.getSummary(safeFromHtml, safeToHtml);
-        response.setSummary(summary);
-        
-        return response;
+        return knowledgeVersionService.findCurrentDescription(knowledgeId);
     }
     
     /**
@@ -145,11 +160,10 @@ public class KnowledgeDiffController {
     }
     
     @Data
-    public static class DiffResponse {
+    public static class DiffSummaryResponse {
         private Long knowledgeId;
         private String fromVersion;
         private String toVersion;
-        private String htmlDiff; // HTML格式的差异对比结果
         private String summary;  // AI生成的差异总结
     }
     
