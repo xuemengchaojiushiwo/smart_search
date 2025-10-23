@@ -16,13 +16,13 @@ spring:
       port: 35729
   
   datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    driver-class-name: org.postgresql.Driver
     # 通过环境变量切换到 PolarDB（MySQL 兼容）：
     #   DB_HOST=<polardb-endpoint>  DB_PORT=3306  DB_NAME=knowledge_base
     #   DB_USER=<user>  DB_PASSWORD=<password>
-    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:knowledge_base}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=${DB_USE_SSL:true}&allowPublicKeyRetrieval=true&allowMultiQueries=true
-    username: ${DB_USER:root}
-    password: ${DB_PASSWORD:xmc131455}
+    url: jdbc:postgresql://localhost:5432/smart_search?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=${DB_USE_SSL:true}&allowPublicKeyRetrieval=true&allowMultiQueries=true
+    username: postgres
+    password: admin
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5
@@ -40,6 +40,7 @@ mybatis-plus:
       logic-delete-value: 1
       logic-not-delete-value: 0
   mapper-locations: classpath*:/mapper/**/*.xml
+  # 保留注解级别的类型处理器绑定，避免全局将 Object 绑定为 jsonb 导致参数类型错配
 
 # JWT配置
 jwt:

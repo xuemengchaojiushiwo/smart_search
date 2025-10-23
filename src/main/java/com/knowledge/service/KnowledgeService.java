@@ -659,6 +659,23 @@ public class KnowledgeService {
     }
     
     /**
+     * 获取需要嵌入处理的知识列表
+     */
+    public List<Knowledge> getKnowledgeListForEmbedding(Long startKnowledgeId, Integer batchSize) {
+        LambdaQueryWrapper<Knowledge> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(Knowledge::getDeleted, 0);
+        queryWrapper.orderByAsc(Knowledge::getId);
+        
+        if (startKnowledgeId != null) {
+            queryWrapper.ge(Knowledge::getId, startKnowledgeId);
+        }
+        
+        queryWrapper.last("LIMIT " + batchSize);
+        
+        return knowledgeMapper.selectList(queryWrapper);
+    }
+    
+    /**
      * 转换为VO
      */
     private KnowledgeVO convertToVO(Knowledge knowledge) {

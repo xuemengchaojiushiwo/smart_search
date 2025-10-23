@@ -122,7 +122,12 @@ public class KnowledgeDiffController {
                         item.setChangeType(version.getChangeType());
                         item.setChangeReason(version.getChangeReason());
                         item.setCreatedBy(version.getCreatedBy());
-                        item.setCreatedTime(version.getCreatedTime());
+                        // 直接设置格式化后的时间字符串
+                        if (version.getCreatedTime() != null) {
+                            item.setCreatedTime(version.getCreatedTime().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+                        } else {
+                            item.setCreatedTime(null);
+                        }
                         return item;
                     })
                     .collect(java.util.stream.Collectors.toList());
@@ -179,7 +184,33 @@ public class KnowledgeDiffController {
         private String changeType;
         private String changeReason;
         private String createdBy;
-        private java.time.LocalDateTime createdTime;
+        
+        private String createdTime; // 直接存储格式化后的时间字符串
+        
+        // Getters and Setters
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+        
+        public Integer getVersionNumber() { return versionNumber; }
+        public void setVersionNumber(Integer versionNumber) { this.versionNumber = versionNumber; }
+        
+        public String getVersionName() { return versionName; }
+        public void setVersionName(String versionName) { this.versionName = versionName; }
+        
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        
+        public String getChangeType() { return changeType; }
+        public void setChangeType(String changeType) { this.changeType = changeType; }
+        
+        public String getChangeReason() { return changeReason; }
+        public void setChangeReason(String changeReason) { this.changeReason = changeReason; }
+        
+        public String getCreatedBy() { return createdBy; }
+        public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
+        
+        public String getCreatedTime() { return createdTime; }
+        public void setCreatedTime(String createdTime) { this.createdTime = createdTime; }
     }
 }
 
