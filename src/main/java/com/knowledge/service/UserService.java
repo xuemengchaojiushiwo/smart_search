@@ -154,15 +154,16 @@ public class UserService extends ServiceImpl<UserMapper, User> {
                 save(user);
                 log.info("基于LDAP信息创建新用户: {} (email: {}, role: {})", username, email, role);
             } else {
-                // 更新用户信息（使用LDAP返回的最新信息）
+                // 更新用户信息（使用LDAP返回的最新信息，但不更新workspaces和system_role字段）
                 user.setEmail(email != null ? email : user.getEmail());
                 user.setDisplayName(displayName != null ? displayName : user.getDisplayName());
-                user.setRole(role != null ? role : user.getRole());
-                user.setSystemRole(systemRole != null ? systemRole : user.getSystemRole());
+                // 不更新role和systemRole字段，保持原有值
+                // user.setRole(role != null ? role : user.getRole());
+                // user.setSystemRole(systemRole != null ? systemRole : user.getSystemRole());
                 user.setUpdatedTime(now);
                 user.setLastLogin(now);  // 更新最后登录时间
                 updateById(user);
-                log.info("基于LDAP信息更新用户: {} (email: {}, role: {})", username, email, role);
+                log.info("基于LDAP信息更新用户: {} (email: {}, 保持原有role和systemRole)", username, email);
             }
 
             if (user.getStatus() != 1) {
