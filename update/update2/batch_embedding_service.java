@@ -109,23 +109,29 @@ class BatchEmbeddingService:
                 file_path = attachment.get('file_path', '')
                 file_type = attachment.get('file_type', '')
                 
-                # 如果数据库中的file_path是相对路径，则拼接基础路径
-                if file_path and not os.path.isabs(file_path):
-                    # 如果file_path已经包含uploads前缀，需要去掉uploads前缀再拼接
-                    if file_path.startswith('uploads/'):
-                        # 去掉uploads/前缀，然后拼接基础路径
-                        relative_path = file_path[8:]  # 去掉"uploads/"
-                        # 检查是否按知识ID分目录存储
-                        knowledge_file_path = os.path.join(file_base_path, str(knowledge_id), relative_path)
-                        if os.path.exists(knowledge_file_path):
-                            full_path = knowledge_file_path
-                        else:
-                            # 如果分目录不存在，尝试直接在uploads目录下查找
-                            full_path = os.path.join(file_base_path, relative_path)
+                # 处理文件路径：支持相对路径和绝对路径
+                if file_path:
+                    if os.path.isabs(file_path):
+                        # 绝对路径，直接使用
+                        full_path = file_path
+                        logger.info(f"使用绝对路径: {full_path}")
                     else:
-                        full_path = os.path.join(file_base_path, file_path)
+                        # 相对路径，需要拼接基础路径
+                        if file_path.startswith('uploads/'):
+                            # 去掉uploads/前缀，然后拼接基础路径
+                            relative_path = file_path[8:]  # 去掉"uploads/"
+                            # 检查是否按知识ID分目录存储
+                            knowledge_file_path = os.path.join(file_base_path, str(knowledge_id), relative_path)
+                            if os.path.exists(knowledge_file_path):
+                                full_path = knowledge_file_path
+                            else:
+                                # 如果分目录不存在，尝试直接在uploads目录下查找
+                                full_path = os.path.join(file_base_path, relative_path)
+                        else:
+                            full_path = os.path.join(file_base_path, file_path)
                 else:
-                    full_path = file_path
+                    # 如果没有file_path，尝试使用文件名在uploads目录下查找
+                    full_path = os.path.join(file_base_path, file_name)
                 
                 # 检查文件是否存在
                 if os.path.exists(full_path):
@@ -231,21 +237,141 @@ class BatchEmbeddingService:
             logger.error(f"获取知识ID列表失败: {e}")
             return []
     
+    async def _get_knowledge_files_from_java(self, request: BatchEmbeddingRequest) -> List[Dict[str, Any]]:
+        """从Java查询知识和文件信息"""
+        try:
+            # 这里应该调用Java的API来获取知识和文件信息
+            # 暂时使用数据库查询作为示例，实际应该调用Java服务
+            knowledge_ids = self._get_knowledge_ids_from_db(request.start_knowledge_id)
+            
+            knowledge_files_data = []
+            for knowledge_id in knowledge_ids:
+                # 获取知识基本信息
+                knowledge_data = self._get_knowledge_data_from_db(knowledge_id)
+                if not knowledge_data:
+                    continue
+                
+                # 获取该知识的所有附件文件
+                files = self._get_attachment_files(knowledge_id, "uploads")
+                if not files:
+                    # 如果没有文件，仍然需要处理元数据embedding
+                    knowledge_files_data.append({
+                        'knowledge_id': knowledge_id,
+                        'knowledge_data': knowledge_data,
+                        'files': []
+                    })
+                else:
+                    # 有文件的情况
+                    knowledge_files_data.append({
+                        'knowledge_id': knowledge_id,
+                        'knowledge_data': knowledge_data,
+                        'files': files
+                    })
+            
+            return knowledge_files_data
+            
+        except Exception as e:
+            logger.error(f"从Java查询知识文件信息失败: {e}")
+            return []
+    
+    async def _process_single_knowledge_embedding_only(self, knowledge_data: Dict[str, Any], 
+                                                     request: BatchEmbeddingRequest) -> bool:
+        """只处理embedding部分，不处理文件上传等"""
+        try:
+            knowledge_id = knowledge_data['knowledge_id']
+            knowledge_info = knowledge_data['knowledge_data']
+            files = knowledge_data['files']
+            
+            # 检查是否需要跳过（如果已存在且不强制重新处理）
+            if not request.force_reprocess and self._check_es_exists(knowledge_id):
+                logger.info(f"知识ID {knowledge_id} 的embedding已存在，跳过处理")
+                return True
+            
+            success_count = 0
+            total_files = len(files)
+            
+            # 处理文件embedding
+            for file_info in files:
+                try:
+                    file_path = file_info["file_path"]
+                    filename = file_info["filename"]
+                    
+                    # 检查文件是否存在
+                    if not os.path.exists(file_path):
+                        logger.warning(f"文件不存在，跳过: {file_path}")
+                        continue
+                    
+                    logger.info(f"开始处理文件embedding: {filename} (知识ID: {knowledge_id})")
+                    
+                    # 使用现有的文档处理逻辑生成embedding
+                    result = process_document_unified(
+                        file_path=file_path,
+                        filename=filename,
+                        knowledge_id=knowledge_id,
+                        knowledge_name=knowledge_info.get("name", ""),
+                        description=knowledge_info.get("description", ""),
+                        tags=json.dumps(knowledge_info.get("tags", []), ensure_ascii=False),
+                        effective_time=knowledge_info.get("effective_time", ""),
+                        workspaces=json.dumps(knowledge_info.get("workspaces", []), ensure_ascii=False)
+                    )
+                    
+                    if result and result.get('chunks_count', 0) > 0:
+                        success_count += 1
+                        logger.info(f"文件 {filename} embedding处理成功，生成 {result['chunks_count']} 个chunks")
+                    else:
+                        logger.warning(f"文件 {filename} embedding处理失败")
+                        
+                except Exception as e:
+                    logger.error(f"处理文件 {file_info.get('filename', 'unknown')} 时发生错误: {e}")
+                    continue
+            
+            # 如果没有文件，处理元数据embedding
+            if total_files == 0:
+                logger.info(f"知识ID {knowledge_id} 没有文件，处理元数据embedding")
+                try:
+                    from es_client import store_knowledge_metadata_to_es
+                    
+                    metadata = {
+                        "knowledge_id": knowledge_id,
+                        "knowledge_name": knowledge_info.get("name", ""),
+                        "description": knowledge_info.get("description", ""),
+                        "tags": knowledge_info.get("tags", []),
+                        "effective_time": knowledge_info.get("effective_time", ""),
+                        "source_file": "",
+                        "workspaces": knowledge_info.get("workspaces", [])
+                    }
+                    
+                    success = store_knowledge_metadata_to_es(metadata)
+                    if success:
+                        success_count = 1  # 元数据embedding也算一个成功
+                        logger.info(f"知识ID {knowledge_id} 元数据embedding处理成功")
+                    else:
+                        logger.warning(f"知识ID {knowledge_id} 元数据embedding处理失败")
+                        
+                except Exception as e:
+                    logger.error(f"处理知识ID {knowledge_id} 元数据embedding时发生错误: {e}")
+            
+            # 至少有一个文件或元数据处理成功才算成功
+            return success_count > 0
+            
+        except Exception as e:
+            logger.error(f"处理知识ID {knowledge_data['knowledge_id']} embedding时发生异常: {e}")
+            return False
+    
     async def process_batch_embedding(self, request: BatchEmbeddingRequest) -> BatchEmbeddingResponse:
         """
-        执行批量文档嵌入处理
+        执行批量文档嵌入处理 - 从Java查询数据，只处理embedding部分
         """
         try:
             # 重置状态
             self.reset_status()
             
-            # 获取需要处理的知识ID列表
-            knowledge_ids = self._get_knowledge_ids_from_db(request.start_knowledge_id)
-            
-            if not knowledge_ids:
+            # 从Java查询需要处理的知识和文件信息
+            knowledge_files_data = await self._get_knowledge_files_from_java(request)
+            if not knowledge_files_data:
                 return BatchEmbeddingResponse(
                     success=True,
-                    message="没有找到需要处理的知识数据",
+                    message="没有找到需要处理的知识和文件",
                     processed_count=0,
                     total_count=0
                 )
@@ -253,69 +379,62 @@ class BatchEmbeddingService:
             # 更新状态
             with self._lock:
                 self.is_running = True
-                self.total_count = len(knowledge_ids)
+                self.total_count = len(knowledge_files_data)
                 self.start_time = datetime.now()
             
-            logger.info(f"开始批量处理，共 {len(knowledge_ids)} 个知识ID")
+            logger.info(f"开始批量embedding处理，共 {len(knowledge_files_data)} 个知识")
             
             processed_count = 0
             next_knowledge_id = None
             
             # 分批处理
-            for i in range(0, len(knowledge_ids), request.batch_size):
+            for i in range(0, len(knowledge_files_data), request.batch_size):
                 if self._stop_event.is_set():
                     logger.info("处理被停止")
                     break
                 
-                batch_ids = knowledge_ids[i:i + request.batch_size]
-                logger.info(f"处理批次 {i//request.batch_size + 1}: 知识ID {batch_ids}")
+                batch_data = knowledge_files_data[i:i + request.batch_size]
+                batch_knowledge_ids = [item['knowledge_id'] for item in batch_data]
+                logger.info(f"处理批次 {i//request.batch_size + 1}: 知识ID {batch_knowledge_ids}")
                 
-                for knowledge_id in batch_ids:
+                for knowledge_data in batch_data:
                     if self._stop_event.is_set():
                         break
                     
                     try:
-                        # 获取知识数据
-                        knowledge_data = self._get_knowledge_data_from_db(knowledge_id)
-                        if not knowledge_data:
-                            logger.warning(f"未找到知识ID {knowledge_id} 的数据，跳过")
-                            continue
+                        knowledge_id = knowledge_data['knowledge_id']
                         
-                        # 获取附件文件
-                        files = self._get_attachment_files(knowledge_id, request.file_base_path)
-                        if not files:
-                            logger.warning(f"知识ID {knowledge_id} 没有找到可处理的文件，跳过")
-                            continue
+                        # 只处理embedding部分
+                        success = await self._process_single_knowledge_embedding_only(
+                            knowledge_data, 
+                            request
+                        )
                         
-                        # 处理每个文件
-                        for file_info in files:
-                            success = self._process_single_document(
-                                knowledge_id, 
-                                file_info, 
-                                knowledge_data, 
-                                request.force_reprocess
-                            )
-                            if success:
-                                processed_count += 1
-                                self._update_status(processed_count, knowledge_id)
+                        if success:
+                            processed_count += 1
+                            self._update_status(processed_count, knowledge_id)
+                            logger.info(f"知识ID {knowledge_id} embedding处理成功 ({processed_count}/{self.total_count})")
+                        else:
+                            logger.warning(f"知识ID {knowledge_id} embedding处理失败")
+                            self._add_error(knowledge_id, "embedding处理失败", "文档处理或嵌入存储失败")
                         
                         # 记录进度
                         if processed_count % 10 == 0:
-                            logger.info(f"已处理 {processed_count}/{self.total_count} 个文档")
+                            logger.info(f"已处理 {processed_count}/{self.total_count} 个知识")
                     
                     except Exception as e:
-                        error_msg = f"处理知识ID {knowledge_id} 时发生错误: {str(e)}"
+                        error_msg = f"处理知识ID {knowledge_data['knowledge_id']} 时发生错误: {str(e)}"
                         logger.error(error_msg)
-                        self._add_error(knowledge_id, "处理异常", error_msg)
+                        self._add_error(knowledge_data['knowledge_id'], "处理异常", error_msg)
                 
                 # 批次间暂停，避免资源占用过高
-                if i + request.batch_size < len(knowledge_ids) and not self._stop_event.is_set():
+                if i + request.batch_size < len(knowledge_files_data) and not self._stop_event.is_set():
                     await asyncio.sleep(1)
             
             # 确定下一个知识ID
             if processed_count < self.total_count:
-                remaining_ids = knowledge_ids[processed_count:]
-                next_knowledge_id = remaining_ids[0] if remaining_ids else None
+                remaining_data = knowledge_files_data[processed_count:]
+                next_knowledge_id = remaining_data[0]['knowledge_id'] if remaining_data else None
             
             # 更新最终状态
             with self._lock:
@@ -323,7 +442,7 @@ class BatchEmbeddingService:
                 self.last_update_time = datetime.now()
             
             success = processed_count > 0
-            message = f"批量处理完成，成功处理 {processed_count}/{self.total_count} 个文档"
+            message = f"批量embedding处理完成，成功处理 {processed_count}/{self.total_count} 个知识"
             if self.errors:
                 message += f"，失败 {len(self.errors)} 个"
             
@@ -338,7 +457,7 @@ class BatchEmbeddingService:
             )
             
         except Exception as e:
-            error_msg = f"批量处理失败: {str(e)}"
+            error_msg = f"批量embedding处理失败: {str(e)}"
             logger.error(error_msg)
             
             with self._lock:
