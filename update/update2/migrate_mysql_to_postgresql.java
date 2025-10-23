@@ -26,7 +26,8 @@ POSTGRES_CONFIG = {
     'port': 5432,
     'user': 'postgres',
     'password': 'password',
-    'database': 'knowledge_base'
+    'database': 'knowledge_base',
+    'options': '-c search_path=public'
 }
 
 def connect_mysql():
@@ -56,8 +57,8 @@ def migrate_users(mysql_conn, postgres_conn):
     users = mysql_cursor.fetchall()
     
     for user in users:
-        # 处理布尔值转换
-        deleted = bool(user['deleted'])
+        # 处理布尔值转换 - PostgreSQL中deleted字段是smallint类型
+        deleted = 1 if user['deleted'] else 0
         status = int(user['status']) if user['status'] is not None else 1
         
         postgres_cursor.execute("""
@@ -91,8 +92,8 @@ def migrate_knowledge(mysql_conn, postgres_conn):
         tags = json.loads(knowledge['tags']) if knowledge['tags'] else []
         table_data = json.loads(knowledge['table_data']) if knowledge['table_data'] else {}
         
-        # 处理布尔值
-        deleted = bool(knowledge['deleted'])
+        # 处理布尔值 - PostgreSQL中deleted字段是smallint类型
+        deleted = 1 if knowledge['deleted'] else 0
         status = int(knowledge['status']) if knowledge['status'] is not None else 1
         
         postgres_cursor.execute("""
@@ -143,7 +144,8 @@ def migrate_attachments(mysql_conn, postgres_conn):
     attachments = mysql_cursor.fetchall()
     
     for attachment in attachments:
-        deleted = bool(attachment['deleted'])
+        # 处理布尔值 - PostgreSQL中deleted字段是smallint类型
+        deleted = 1 if attachment['deleted'] else 0
         
         postgres_cursor.execute("""
             INSERT INTO attachments (id, knowledge_id, file_name, file_path, file_size, file_type,
@@ -190,9 +192,9 @@ def migrate_other_tables(mysql_conn, postgres_conn):
                 values = []
                 for col in columns:
                     value = row[col]
-                    # 处理布尔值
+                    # 处理布尔值 - PostgreSQL中deleted字段是smallint类型
                     if col == 'deleted' and value is not None:
-                        value = bool(value)
+                        value = 1 if value else 0
                     elif col in ['status', 'attitude', 'message_count', 'result_count', 'search_count', 'download_count'] and value is not None:
                         value = int(value)
                     values.append(value)
