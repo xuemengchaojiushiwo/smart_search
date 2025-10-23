@@ -120,6 +120,7 @@ def migrate_knowledge_workspace(mysql_conn, postgres_conn):
     mysql_cursor = mysql_conn.cursor(dictionary=True)
     postgres_cursor = postgres_conn.cursor()
     
+    # 先迁移原有的关联关系
     mysql_cursor.execute("SELECT * FROM knowledge_workspace")
     relations = mysql_cursor.fetchall()
     
@@ -130,8 +131,34 @@ def migrate_knowledge_workspace(mysql_conn, postgres_conn):
             ON CONFLICT (id) DO NOTHING
         """, (relation['id'], relation['knowledge_id'], relation['workspace']))
     
+    # 获取所有知识ID，确保每个知识都有WPB工作空间关联
+    mysql_cursor.execute("SELECT id FROM knowledge WHERE deleted = 0")
+    knowledge_ids = mysql_cursor.fetchall()
+    
+    # 为每个知识添加WPB工作空间关联（如果不存在）
+    for knowledge in knowledge_ids:
+        knowledge_id = knowledge['id']
+        # 检查是否已存在WPB关联
+        postgres_cursor.execute("""
+            SELECT COUNT(*) FROM knowledge_workspace 
+            WHERE knowledge_id = %s AND workspace = 'WPB'
+        """, (knowledge_id,))
+        count = postgres_cursor.fetchone()[0]
+        
+        if count == 0:
+            # 获取下一个可用的ID
+            postgres_cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM knowledge_workspace")
+            next_id = postgres_cursor.fetchone()[0]
+            
+            postgres_cursor.execute("""
+                INSERT INTO knowledge_workspace (id, knowledge_id, workspace)
+                VALUES (%s, %s, 'WPB')
+            """, (next_id, knowledge_id))
+            print(f"为知识 {knowledge_id} 添加WPB工作空间关联")
+    
     postgres_conn.commit()
-    print(f"迁移了 {len(relations)} 个知识工作空间关联")
+    print(f"迁移了 {len(relations)} 个原有知识工作空间关联")
+    print(f"为 {len(knowledge_ids)} 个知识确保WPB工作空间关联")
 
 def migrate_attachments(mysql_conn, postgres_conn):
     """迁移附件数据"""
