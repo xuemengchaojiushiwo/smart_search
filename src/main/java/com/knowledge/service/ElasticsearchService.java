@@ -302,8 +302,19 @@ public class ElasticsearchService {
             // 5. 解析结果并按knowledge_id去重（保留相似度最高的）
             Map<Long, ElasticsearchResultVO> knowledgeMap = new java.util.LinkedHashMap<>();
             
+            // 设置相似度阈值，过滤掉相似度过低的结果
+            double SIMILARITY_THRESHOLD = 1.5;
+            
             for (SearchHit hit : response.getHits().getHits()) {
                 Map<String, Object> source = hit.getSourceAsMap();
+                
+                // 检查相似度阈值
+                double score = hit.getScore();
+                if (score < SIMILARITY_THRESHOLD) {
+                    log.debug("结果相似度过低 ({:.4f} < {:.4f})，跳过: knowledge_id={}", 
+                            score, SIMILARITY_THRESHOLD, source.get("knowledge_id"));
+                    continue;
+                }
                 
                 // 获取knowledge_id
                 Object idObj = source.get("knowledge_id");
