@@ -10,6 +10,7 @@ import com.knowledge.vo.ApiResponse;
 import com.knowledge.entity.User;
 import com.knowledge.vo.KnowledgeVO;
 import com.knowledge.vo.KnowledgeListVO;
+import com.knowledge.vo.TreeSearchResultVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -366,6 +367,24 @@ public class KnowledgeController {
         // 转换为简化版的KnowledgeListVO
         IPage<KnowledgeListVO> simplifiedResult = result.convert(KnowledgeListVO::fromKnowledgeVO);
         return ApiResponse.success("获取子知识成功", simplifiedResult);
+    }
+
+    @GetMapping("/tree/search")
+    @Operation(summary = "树形搜索", description = "根据节点类型和知识名称模糊查询，返回匹配的节点及其完整路径")
+    public ApiResponse<List<TreeSearchResultVO>> searchTree(
+            @Parameter(description = "搜索关键词", example = "测试") @RequestParam String keyword,
+            @Parameter(description = "节点类型，可选值：folder/doc", example = "folder") @RequestParam(required = false) String nodeType,
+            @Parameter(description = "工作空间，不传则使用用户默认工作空间", example = "WPB") @RequestParam(required = false) String workspace,
+            @Parameter(description = "最大返回数量", example = "50") @RequestParam(defaultValue = "50") int limit) {
+        
+        org.springframework.web.context.request.ServletRequestAttributes attributes = 
+            (org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        javax.servlet.http.HttpServletRequest req = attributes != null ? attributes.getRequest() : null;
+        String userId = resolveUserIdFromHeader(req);
+        List<String> allowed = resolveWorkspaces(userId, workspace);
+        
+        List<TreeSearchResultVO> results = knowledgeService.searchTree(keyword, nodeType, allowed, limit);
+        return ApiResponse.success("树形搜索成功", results);
     }
     
     @GetMapping("/popular")

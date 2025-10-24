@@ -841,4 +841,124 @@ public class KnowledgeService {
     public List<Attachment> getAttachmentsByKnowledgeId(Long knowledgeId) {
         return attachmentService.getByKnowledgeId(knowledgeId);
     }
+    
+    /**
+     * 树形搜索
+     * @param keyword 搜索关键词
+     * @param nodeType 节点类型过滤
+     * @param allowedWorkspaces 允许的工作空间
+     * @param limit 最大返回数量
+     * @return 搜索结果列表
+     */
+    public List<com.knowledge.vo.TreeSearchResultVO> searchTree(String keyword, String nodeType, List<String> allowedWorkspaces, int limit) {
+        try {
+            // 1. 构建查询条件
+            LambdaQueryWrapper<Knowledge> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(Knowledge::getDeleted, 0);
+            
+            // 添加名称模糊查询
+            if (keyword != null && !keyword.trim().isEmpty()) {
+                wrapper.like(Knowledge::getName, keyword.trim());
+            }
+            
+            // 添加节点类型过滤
+            if (nodeType != null && !nodeType.trim().isEmpty()) {
+                wrapper.eq(Knowledge::getNodeType, nodeType.trim());
+            }
+            
+            // 添加工作空间过滤
+            if (allowedWorkspaces != null && !allowedWorkspaces.isEmpty()) {
+                java.util.Set<Long> allowedKnowledgeIds = knowledgeWorkspaceService.listKnowledgeIdsByWorkspaces(allowedWorkspaces);
+                if (allowedKnowledgeIds.isEmpty()) {
+                    return java.util.Collections.emptyList(); // 没有权限访问任何知识
+                }
+                wrapper.in(Knowledge::getId, allowedKnowledgeIds);
+            }
+            
+            // 限制返回数量
+            wrapper.last("LIMIT " + Math.min(limit, 100)); // 最多返回100条
+            
+            // 2. 执行查询
+            List<Knowledge> matchedKnowledge = knowledgeMapper.selectList(wrapper);
+            
+            if (matchedKnowledge.isEmpty()) {
+                return java.util.Collections.emptyList();
+            }
+            
+            // 3. 构建搜索结果
+            List<com.knowledge.vo.TreeSearchResultVO> results = new java.util.ArrayList<>();
+            
+            for (Knowledge knowledge : matchedKnowledge) {
+                com.knowledge.vo.TreeSearchResultVO result = new com.knowledge.vo.TreeSearchResultVO();
+                result.setId(knowledge.getId());
+                result.setName(knowledge.getName());
+                result.setDescription(knowledge.getDescription());
+                result.setParentId(knowledge.getParentId());
+                result.setNodeType(knowledge.getNodeType());
+                result.setTags(knowledge.getTags());
+                result.setCreatedTime(knowledge.getCreatedTime());
+                result.setUpdatedTime(knowledge.getUpdatedTime());
+                
+                // 4. 构建完整路径
+                List<com.knowledge.vo.TreeSearchResultVO.PathNodeVO> fullPath = buildFullPath(knowledge.getId());
+                result.setFullPath(fullPath);
+                
+                results.add(result);
+            }
+            
+            log.info("树形搜索完成: keyword={}, nodeType={}, 匹配数量={}", keyword, nodeType, results.size());
+            return results;
+            
+        } catch (Exception e) {
+            log.error("树形搜索失败: keyword={}, nodeType={}, error={}", keyword, nodeType, e.getMessage(), e);
+            return java.util.Collections.emptyList();
+        }
+    }
+    
+    /**
+     * 构建完整路径（从根节点到指定节点）
+     * @param knowledgeId 目标节点ID
+     * @return 路径节点列表
+     */
+    private List<com.knowledge.vo.TreeSearchResultVO.PathNodeVO> buildFullPath(Long knowledgeId) {
+        List<com.knowledge.vo.TreeSearchResultVO.PathNodeVO> path = new java.util.ArrayList<>();
+        
+        try {
+            // 从目标节点开始，向上追溯到根节点
+            Long currentId = knowledgeId;
+            java.util.Set<Long> visited = new java.util.HashSet<>(); // 防止循环引用
+            
+            while (currentId != null && !visited.contains(currentId)) {
+                visited.add(currentId);
+                
+                Knowledge current = knowledgeMapper.selectById(currentId);
+                if (current == null || current.getDeleted() == 1) {
+                    break;
+                }
+                
+                // 创建路径节点
+                com.knowledge.vo.TreeSearchResultVO.PathNodeVO pathNode = 
+                    new com.knowledge.vo.TreeSearchResultVO.PathNodeVO(
+                        current.getId(),
+                        current.getName(),
+                        current.getNodeType(),
+                        currentId.equals(knowledgeId) // 标记是否为当前匹配的节点
+                    );
+                
+                // 添加到路径开头（因为我们是向上追溯的）
+                path.add(0, pathNode);
+                
+                // 继续向上查找父节点
+                currentId = current.getParentId();
+                if (currentId != null && currentId == 0) {
+                    currentId = null; // 0表示根节点
+                }
+            }
+            
+        } catch (Exception e) {
+            log.error("构建路径失败: knowledgeId={}, error={}", knowledgeId, e.getMessage(), e);
+        }
+        
+        return path;
+    }
 } 
