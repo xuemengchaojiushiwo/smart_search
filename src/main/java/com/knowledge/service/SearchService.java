@@ -299,22 +299,8 @@ public class SearchService {
     }
     
     public SearchResultVO esSearchKnowledge(SearchRequest request, Long userId, String workspace) {
-        // 记录搜索历史
-        SearchHistory history = new SearchHistory();
-        com.knowledge.entity.User user = userService.getById(userId);
-        if (user != null && user.getStaffId() != null) {
-            try {
-                history.setUserId(Long.valueOf(user.getStaffId()));
-            } catch (NumberFormatException e) {
-                history.setUserId(userId);
-            }
-        } else {
-            history.setUserId(userId);
-        }
-        history.setQuery(request.getQuery());
-        history.setSearchTime(LocalDateTime.now());
-        searchHistoryService.save(history);
-
+        // ES快速搜索不记录搜索历史，避免重复记录
+        
         // 解析工作空间
         List<String> allowedWorkspaces = resolveWorkspaces(userId, workspace);
 
@@ -332,10 +318,6 @@ public class SearchService {
         result.setTotal(esResults.getTotal());
         result.setEsResults(esResults.getRecords());
         result.setRagResults(new ArrayList<>()); // 空RAG结果
-
-        // 更新搜索历史的结果数量
-        history.setResultCount((int) esResults.getTotal());
-        searchHistoryService.updateById(history);
 
         return result;
     }
